@@ -1,0 +1,212 @@
+import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView, ComboBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "RustProAI - S3 Sync Tool";
+    min-width: 500px;
+    min-height: 720px;
+    background: #1a1a1a;
+
+    in-out property <[string]> local-paths: [];
+    in-out property <string> access-key;
+    in-out property <string> secret-key;
+    in-out property <string> session-token;
+    in-out property <string> region: "us-east-1";
+    in-out property <string> bucket-name;
+    in-out property <string> status-text: "Sẵn sàng";
+    in-out property <float> progress: 0.0;
+    in-out property <bool> show-config: true;
+
+    callback select-folder();
+    callback clear-folders();
+    callback start-sync(string, string, string, string, string, [string]);
+    callback test-access(string, string, string, string, string);
+
+    VerticalBox {
+        padding: 30px;
+        spacing: 20px;
+
+        // Header
+        Text {
+            text: "S3 Sync Tool";
+            font-size: 28px;
+            font-weight: 800;
+            color: #61afef;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: "Tối ưu hóa bởi RustProAI";
+            font-size: 14px;
+            font-italic: true;
+            color: #abb2bf;
+            horizontal-alignment: center;
+        }
+
+        // AWS Auth Section
+        Rectangle {
+            background: #282c34;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 15px;
+                spacing: 12px;
+                
+                HorizontalBox {
+                    Text { text: "AWS Configuration"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
+                    if (!show-config) : Button {
+                        text: "Chỉnh sửa";
+                        width: 100px;
+                        clicked => { show-config = true; }
+                    }
+                }
+                
+                if (show-config) : VerticalBox {
+                    padding: 0;
+                    spacing: 12px;
+                    LineEdit {
+                        placeholder-text: "AWS Access Key ID";
+                        text <=> access-key;
+                    }
+                    LineEdit {
+                        placeholder-text: "AWS Secret Access Key";
+                        input-type: password;
+                        text <=> secret-key;
+                    }
+                    LineEdit {
+                        placeholder-text: "AWS Session Token (Optional)";
+                        text <=> session-token;
+                    }
+                    HorizontalBox {
+                        spacing: 10px;
+                        Text { text: "Region:"; color: #abb2bf; vertical-alignment: center; }
+                        ComboBox {
+                            model: ["ap-northeast-1"];
+                            current-value <=> region;
+                        }
+                    }
+                    HorizontalBox {
+                        spacing: 10px;
+                        Text { text: "Bucket:"; color: #abb2bf; vertical-alignment: center; }
+                        ComboBox {
+                            model: [
+                                "ien-corp-dev-contents",
+                                "i-ocean-global-stg-contents",
+                                "i-ocean-global-prod-contents",
+                                "ien-corp-prod-contents"
+                            ];
+                            current-value <=> bucket-name;
+                        }
+                    }
+                    
+                    Button {
+                        text: "Test Access";
+                        enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
+                        clicked => {
+                            test-access(access-key, secret-key, session-token, region, bucket-name);
+                        }
+                    }
+                }
+
+                if (!show-config) : Text {
+                    text: "✓ Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ", Region: " + region + ")";
+                    color: #98c379;
+                    font-size: 13px;
+                }
+            }
+        }
+
+        // Folder Selection Section
+        Rectangle {
+            background: #282c34;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 15px;
+                spacing: 12px;
+                HorizontalBox {
+                    Text { text: "Local Folders"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
+                    Button {
+                        text: "Xóa hết";
+                        width: 80px;
+                        clicked => { clear-folders() }
+                    }
+                }
+                
+                Rectangle {
+                    background: #21252b;
+                    border-radius: 4px;
+                    height: 120px;
+                    ScrollView {
+                        VerticalBox {
+                            padding: 5px;
+                            spacing: 5px;
+                            for path in local-paths : Rectangle {
+                                background: #2c313a;
+                                border-radius: 2px;
+                                height: 30px;
+                                HorizontalBox {
+                                    padding-left: 10px;
+                                    Text {
+                                        text: path;
+                                        vertical-alignment: center;
+                                        color: #abb2bf;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                            if (local-paths.length == 0) : Text {
+                                text: "Chưa chọn thư mục nào...";
+                                color: #5c6370;
+                                font-italic: true;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Thêm Folder";
+                    primary: true;
+                    clicked => { select-folder() }
+                }
+            }
+        }
+
+        // Progress & Status
+        VerticalBox {
+            spacing: 8px;
+            Text {
+                text: status-text;
+                color: #98c379;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+            
+            // Custom Progress Bar
+            Rectangle {
+                background: #21252b;
+                height: 6px;
+                border-radius: 3px;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * progress;
+                    background: #61afef;
+                    border-radius: 3px;
+                    animate width { duration: 250ms; easing: ease-in-out; }
+                }
+            }
+        }
+
+        // Action Button
+        Button {
+            text: "Sync Now";
+            height: 50px;
+            primary: true;
+            enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0;
+            clicked => {
+                start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths);
+            }
+        }
+    }
+}
