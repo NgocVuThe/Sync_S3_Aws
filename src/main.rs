@@ -93,6 +93,27 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     });
 
+    // Handle Remove Single Folder
+    ui.on_remove_folder({
+        let ui_handle = ui.as_weak();
+        move |index| {
+            let _ = ui_handle.upgrade_in_event_loop(move |ui| {
+                let model = ui.get_local_paths();
+                if let Some(vec_model) = model.as_any().downcast_ref::<slint::VecModel<slint::SharedString>>() {
+                    vec_model.remove(index as usize);
+                } else {
+                    // Fallback if downcast fails (should not happen with VecModel)
+                    let mut current_paths: Vec<slint::SharedString> = ui.get_local_paths().iter().collect();
+                    if (index as usize) < current_paths.len() {
+                        current_paths.remove(index as usize);
+                        let new_model = std::rc::Rc::new(slint::VecModel::from(current_paths));
+                        ui.set_local_paths(slint::ModelRc::from(new_model));
+                    }
+                }
+            });
+        }
+    });
+
     // Handle Sync Action (Multi-folder Support)
     ui.on_start_sync({
         let ui_handle = ui.as_weak();

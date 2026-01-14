@@ -18,6 +18,7 @@ export component AppWindow inherits Window {
 
     callback select-folder();
     callback clear-folders();
+    callback remove-folder(int);
     callback start-sync(string, string, string, string, string, [string]);
     callback test-access(string, string, string, string, string);
 
@@ -124,10 +125,13 @@ export component AppWindow inherits Window {
                 padding: 15px;
                 spacing: 12px;
                 HorizontalBox {
+                    alignment: start;
+                    spacing: 15px;
                     Text { text: "Local Folders"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
                     Button {
                         text: "Xóa hết";
                         width: 80px;
+                        height: 24px;
                         clicked => { clear-folders() }
                     }
                 }
@@ -135,23 +139,53 @@ export component AppWindow inherits Window {
                 Rectangle {
                     background: #21252b;
                     border-radius: 4px;
-                    height: 120px;
+                    height: Math.min(200px, Math.max(60px, local-paths.length * 35px + 10px));
+                    animate height { duration: 250ms; easing: ease-in-out; }
                     ScrollView {
                         VerticalBox {
-                            padding: 5px;
-                            spacing: 5px;
-                            for path in local-paths : Rectangle {
+                            padding: 2px;
+                            spacing: 1px;
+                            for path[index] in local-paths : Rectangle {
                                 background: #2c313a;
                                 border-radius: 2px;
-                                height: 30px;
-                                HorizontalBox {
-                                    padding-left: 10px;
+                                 HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 8px;
+                                    height: 24px;
+
                                     Text {
                                         text: path;
                                         vertical-alignment: center;
                                         color: #abb2bf;
-                                        font-size: 12px;
+                                        font-size: 11px;
                                         overflow: elide;
+                                    }
+
+                                    Rectangle { horizontal-stretch: 1; } // Fill remaining space
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 16px;
+                                            height: 16px;
+                                            background: remove-ta.has-hover ? #4b5263 : #3e4451;
+                                            border-radius: 8px;
+                                            animate background { duration: 150ms; }
+                                            
+                                            remove-ta := TouchArea {
+                                                clicked => { remove-folder(index) }
+                                                mouse-cursor: pointer;
+                                            }
+
+                                            Text {
+                                                text: "X";
+                                                color: remove-ta.has-hover ? #ff7070 : #e06c75;
+                                                font-size: 8px;
+                                                font-weight: 1000;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -165,10 +199,24 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Button {
-                    text: "Thêm Folder";
-                    primary: true;
-                    clicked => { select-folder() }
+                HorizontalBox {
+                    alignment: start;
+                    spacing: 10px;
+                    Button {
+                        text: "Thêm Folder";
+                        height: 32px;
+                        primary: true;
+                        clicked => { select-folder() }
+                    }
+                    Button {
+                        text: "Sync Now";
+                        height: 32px;
+                        primary: true;
+                        enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0;
+                        clicked => {
+                            start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths);
+                        }
+                    }
                 }
             }
         }
@@ -198,15 +246,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Action Button
-        Button {
-            text: "Sync Now";
-            height: 50px;
-            primary: true;
-            enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0;
-            clicked => {
-                start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths);
-            }
-        }
+
     }
 }
