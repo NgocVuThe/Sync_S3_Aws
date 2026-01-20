@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use walkdir::WalkDir;
 
 use crate::utils::{get_mime_type, update_status};
@@ -99,14 +99,20 @@ pub async fn sync_to_s3(
 
             let key = if let Some((base_path, folder_name)) = folder_info {
                 let relative_path = path.strip_prefix(&base_path).unwrap_or(&path);
+                // Ensure forward slashes for S3
                 let normalized_path = relative_path.to_string_lossy().replace('\\', "/");
-                format!("{}/{}", folder_name, normalized_path)
+                // Remove leading slash if present in relative path to avoid double slashes//
+                let clean_path = normalized_path.trim_start_matches('/');
+                format!("{}/{}", folder_name, clean_path)
             } else {
                 path.file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string()
             };
+
+            // Log mapping for user visibility
+            info!("Map local file: {:?} -> S3 Key: {}", path, key);
             let normalized_path = path
                 .file_name()
                 .unwrap_or_default()
