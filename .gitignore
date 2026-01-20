@@ -1,2 +1,6 @@
 /target
 .idea
+*.log
+s3_debug.log
+.DS_Store
+Thumbs.db

@@ -2,6 +2,7 @@ import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView, ComboBox } fr
 
 export component AppWindow inherits Window {
     title: "RustProAI - S3 Sync Tool";
+    icon: @image-url("icon_final.png");
     min-width: 500px;
     min-height: 720px;
     background: #1a1a1a;
@@ -10,13 +11,14 @@ export component AppWindow inherits Window {
     in-out property <string> access-key;
     in-out property <string> secret-key;
     in-out property <string> session-token;
-    in-out property <string> region: "us-east-1";
+    in-out property <string> region: "ap-northeast-1";
     in-out property <string> bucket-name;
     in-out property <string> status-text: "Sẵn sàng";
     in-out property <float> progress: 0.0;
     in-out property <bool> show-config: true;
 
     callback select-folder();
+    callback select-files();
     callback clear-folders();
     callback remove-folder(int);
     callback start-sync(string, string, string, string, string, [string]);
@@ -127,7 +129,7 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     alignment: start;
                     spacing: 15px;
-                    Text { text: "Local Folders"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
+                    Text { text: "Local Folders/Files"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
                     Button {
                         text: "Xóa hết";
                         width: 80px;
@@ -190,7 +192,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             if (local-paths.length == 0) : Text {
-                                text: "Chưa chọn thư mục nào...";
+                                text: "Chưa chọn thư mục/file nào...";
                                 color: #5c6370;
                                 font-italic: true;
                                 horizontal-alignment: center;
@@ -207,6 +209,11 @@ export component AppWindow inherits Window {
                         height: 32px;
                         primary: true;
                         clicked => { select-folder() }
+                    }
+                    Button {
+                        text: "Thêm File";
+                        height: 32px;
+                        clicked => { select-files() }
                     }
                     Button {
                         text: "Sync Now";
