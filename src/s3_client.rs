@@ -1,13 +1,13 @@
 use crate::*;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
-use aws_sdk_s3::primitives::ByteStream;
 use slint::Weak;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Mutex;
 use tokio::task::JoinSet;
+use tokio::io::{AsyncBufReadExt, BufReader, AsyncReadExt};
 use tracing::{debug, error, info};
 use walkdir::WalkDir;
 
@@ -213,72 +213,80 @@ pub async fn sync_to_s3(
         return Ok(());
     }
 
-    let concurrency = std::env::var("S3_SYNC_CONCURRENCY")
-        .unwrap_or_else(|_| "50".to_string())
-        .parse()
-        .unwrap_or(50);
-    let semaphore = Arc::new(Semaphore::new(concurrency));
+    // Group files by their base_path and prefix for AWS CLI sync
+    use std::collections::HashMap;
+    let mut sync_groups: HashMap<(PathBuf, String), Vec<PathBuf>> = HashMap::new();
+    for (path, base_path, prefix) in all_files {
+        sync_groups.entry((base_path, prefix)).or_insert(Vec::new()).push(path);
+    }
+
     let mut set = JoinSet::new();
     let completed_count = Arc::new(tokio::sync::Mutex::new(0));
+    let ui_handle_arc = Arc::new(ui_handle);
 
-    for (path, base_path, prefix) in all_files {
-        let client = Arc::clone(&client);
-        let semaphore = Arc::clone(&semaphore);
-        let ui_handle = ui_handle.clone();
+    for ((base_path, prefix), _files) in sync_groups {
         let bucket_name = bucket_name.clone();
         let completed_count = Arc::clone(&completed_count);
+        let ui_handle = Arc::clone(&ui_handle_arc);
 
         set.spawn(async move {
-            let _permit = semaphore.acquire().await.unwrap();
+            let s3_uri = format!("s3://{}/{}", bucket_name, prefix);
+            let local_path_str = base_path.to_string_lossy();
 
-            let key = if path == base_path {
-                prefix
-            } else {
-                let relative_path = path.strip_prefix(&base_path).unwrap_or(&path);
-                let clean_path = relative_path.to_string_lossy().replace('\\', "/");
-                let clean_path = clean_path.trim_start_matches('/');
-                format!("{}/{}", prefix, clean_path)
-            };
+            info!("Syncing {} to {}", local_path_str, s3_uri);
 
-            info!("Map local file: {:?} -> S3 Key: {}", path, key);
-            let display_name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let mime_type = get_mime_type(&path);
+            let mut cmd = tokio::process::Command::new("aws");
+            cmd.args(&["s3", "sync", &local_path_str, &s3_uri, "--delete"]);
 
-            match ByteStream::from_path(&path).await {
-                Ok(stream) => {
-                    match client
-                        .put_object()
-                        .bucket(&bucket_name)
-                        .key(&key)
-                        .content_type(mime_type)
-                        .cache_control("no-cache")
-                        .body(stream)
-                        .send()
-                        .await
-                    {
-                        Ok(_) => {
-                            let mut count = completed_count.lock().await;
-                            *count += 1;
-                            let progress = *count as f32 / total_files as f32;
-                            update_status(
-                                &ui_handle,
-                                format!(
-                                    "Đang upload: {} ({}/{})",
-                                    display_name, *count, total_files
-                                ),
-                                progress,
-                            );
-                            debug!("Uploaded: {}", key);
+            cmd.stdout(std::process::Stdio::piped());
+            cmd.stderr(std::process::Stdio::piped());
+
+            match cmd.spawn() {
+                Ok(mut child) => {
+                    let stdout = child.stdout.take().unwrap();
+                    let stderr = child.stderr.take().unwrap();
+
+                    let completed_count_clone = Arc::clone(&completed_count);
+                    let ui_handle_clone = Arc::clone(&ui_handle);
+
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncBufReadExt, BufReader};
+                        let mut stdout_reader = BufReader::new(stdout).lines();
+                        while let Ok(Some(line)) = stdout_reader.next_line().await {
+                            if line.starts_with("upload:") {
+                                let mut count = completed_count_clone.lock().await;
+                                *count += 1;
+                                let progress = *count as f32 / total_files as f32;
+                                update_status(
+                                    &ui_handle_clone,
+                                    format!("Đang upload: {} ({}/{})", line, *count, total_files),
+                                    progress,
+                                );
+                            }
+                        }
+                    });
+
+                    let stderr_handle = tokio::spawn(async move {
+                        use tokio::io::AsyncReadExt;
+                        let mut stderr_buf = Vec::new();
+                        let mut stderr_reader = BufReader::new(stderr);
+                        let _ = stderr_reader.read_to_end(&mut stderr_buf).await;
+                        String::from_utf8_lossy(&stderr_buf).to_string()
+                    });
+
+                    let status = child.wait().await;
+                    let stderr_output = stderr_handle.await.unwrap_or_default();
+
+                    match status {
+                        Ok(exit_status) if exit_status.success() => {
+                            info!("Synced {} successfully", local_path_str);
                             Ok(())
                         }
-                        Err(e) => Err(format!("Lỗi upload {}: {}", key, e)),
+                        Ok(exit_status) => Err(format!("AWS CLI failed for {}: exit code {}, stderr: {}", local_path_str, exit_status, stderr_output)),
+                        Err(e) => Err(format!("Failed to run AWS CLI for {}: {}", local_path_str, e)),
                     }
                 }
-                Err(e) => Err(format!("Lỗi mở file {}: {}", path.display(), e)),
+                Err(e) => Err(format!("Failed to spawn AWS CLI for {}: {}", local_path_str, e)),
             }
         });
     }
@@ -287,7 +295,7 @@ pub async fn sync_to_s3(
     while let Some(res) = set.join_next().await {
         if let Ok(Err(e)) = res {
             error!("{}", e);
-            update_status(&ui_handle, format!("Lỗi: {}", e), 0.0);
+            update_status(&ui_handle_arc, format!("Lỗi: {}", e), 0.0);
             has_error = true;
             set.abort_all();
             break;
@@ -295,7 +303,7 @@ pub async fn sync_to_s3(
     }
 
     if !has_error {
-        update_status(&ui_handle, "Đồng bộ hoàn tất!".to_string(), 1.0);
+        update_status(&ui_handle_arc, "Đồng bộ hoàn tất!".to_string(), 1.0);
     }
 
     Ok(())
