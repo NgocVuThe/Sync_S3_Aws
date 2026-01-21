@@ -244,11 +244,24 @@ pub async fn sync_to_s3(
 
             info!("Syncing {} to {}", local_path_str, s3_uri);
 
-            let mut cmd = tokio::process::Command::new("aws");
-            if base_path.is_file() {
-                cmd.args(&["s3", "cp", &local_path_str, &s3_uri]);
+            let aws_path = if cfg!(windows) {
+                r"C:\Program Files\Amazon\AWSCLIV2\aws.exe"
             } else {
-                cmd.args(&["s3", "sync", &local_path_str, &s3_uri]);
+                "aws"
+            };
+            let mut cmd = tokio::process::Command::new(aws_path);
+            if base_path.is_file() {
+                let mime_type = get_mime_type(&base_path);
+                cmd.args(&[
+                    "s3",
+                    "cp",
+                    &local_path_str,
+                    &s3_uri,
+                    "--content-type",
+                    mime_type,
+                ]);
+            } else {
+                cmd.args(&["s3", "sync", &local_path_str, &s3_uri, "--delete"]);
             }
 
             if !acc_key.is_empty() {
