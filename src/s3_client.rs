@@ -236,7 +236,11 @@ pub async fn sync_to_s3(
             info!("Syncing {} to {}", local_path_str, s3_uri);
 
             let mut cmd = tokio::process::Command::new("aws");
-            cmd.args(&["s3", "sync", &local_path_str, &s3_uri, "--delete"]);
+            if base_path.is_file() {
+                cmd.args(&["s3", "cp", &local_path_str, &s3_uri]);
+            } else {
+                cmd.args(&["s3", "sync", &local_path_str, &s3_uri]);
+            }
 
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
