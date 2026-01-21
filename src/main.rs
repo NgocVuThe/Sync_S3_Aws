@@ -1,6 +1,6 @@
 use tracing::info;
 use tracing_appender;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use rust_project::*;
 

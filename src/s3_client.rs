@@ -1,18 +1,19 @@
 use crate::*;
+use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::Client;
 use slint::Weak;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info};
 use walkdir::WalkDir;
 
 use crate::utils::{get_mime_type, update_status};
 
-/// Creates an S3 client with the provided credentials and region.
+/// Creates an S3 client with provided credentials and region.
 pub async fn create_s3_client(
     acc_key: String,
     sec_key: String,
@@ -28,13 +29,145 @@ pub async fn create_s3_client(
     Ok(Client::new(&config))
 }
 
-/// Tests access to the S3 bucket by attempting to head the bucket.
+/// Tests access to S3 bucket by attempting to head the bucket.
 pub async fn test_bucket_access(client: &Client, bucket: &str) -> Result<(), aws_sdk_s3::Error> {
     client.head_bucket().bucket(bucket).send().await?;
     Ok(())
 }
 
-/// Performs the sync operation: uploads all files from the provided local paths to the S3 bucket.
+/// Cache structure for S3 prefix lookups to avoid redundant requests
+struct PrefixCache {
+    prefixes: HashSet<String>,
+    cache_time: std::time::Instant,
+}
+
+impl PrefixCache {
+    fn new() -> Self {
+        Self {
+            prefixes: HashSet::new(),
+            cache_time: std::time::Instant::now(),
+        }
+    }
+
+    fn is_expired(&self, ttl_secs: u64) -> bool {
+        self.cache_time.elapsed().as_secs() > ttl_secs
+    }
+}
+
+/// Global cache for S3 prefixes per bucket
+type GlobalPrefixCache = Arc<Mutex<HashMap<String, PrefixCache>>>;
+
+/// Checks if a prefix (folder) exists in S3 bucket using cache.
+async fn is_s3_prefix_exists_cached(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    cache: &GlobalPrefixCache,
+) -> bool {
+    let prefix_normalized = if prefix.ends_with('/') || prefix.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{}/", prefix)
+    };
+
+    let mut cache_guard = cache.lock().await;
+
+    let cache_entry = cache_guard.get(bucket);
+    let needs_refresh = cache_entry.is_none() || cache_entry.unwrap().is_expired(300);
+
+    if needs_refresh {
+        if let Ok(resp) = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .delimiter("/")
+            .max_keys(1000)
+            .send()
+            .await
+        {
+            let mut new_cache = PrefixCache::new();
+            for cp in resp.common_prefixes() {
+                if let Some(prefix) = cp.prefix() {
+                    new_cache.prefixes.insert(
+                        prefix
+                            .trim_end_matches('/')
+                            .trim_start_matches('/')
+                            .to_string(),
+                    );
+                }
+            }
+            for obj in resp.contents() {
+                if let Some(key) = obj.key() {
+                    if let Some((parent, _)) = key.rsplit_once('/') {
+                        new_cache.prefixes.insert(
+                            parent
+                                .trim_end_matches('/')
+                                .trim_start_matches('/')
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            cache_guard.insert(bucket.to_string(), new_cache);
+        }
+    }
+
+    if let Some(entry) = cache_guard.get(bucket) {
+        let trimmed = prefix_normalized.trim_end_matches('/');
+        return entry.prefixes.contains(trimmed);
+    }
+
+    false
+}
+
+/// Finds best S3 prefix for a local folder by matching its hierarchy.
+/// Uses cached S3 data for better performance.
+async fn find_best_s3_prefix(
+    client: &Client,
+    bucket: &str,
+    local_path: &PathBuf,
+    cache: &GlobalPrefixCache,
+) -> String {
+    let folder_name = local_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let normalized = local_path.to_string_lossy().replace('\\', "/");
+    let parts: Vec<&str> = normalized
+        .split('/')
+        .filter_map(|s| {
+            let s = s.trim();
+            if !s.is_empty() && !s.contains(':') {
+                Some(s)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if parts.is_empty() {
+        return folder_name;
+    }
+
+    let n = parts.len();
+    for i in 0..n {
+        let candidate = parts[i..].join("/");
+        debug!("Checking S3 prefix candidate: '{}'", candidate);
+        if is_s3_prefix_exists_cached(client, bucket, &candidate, cache).await {
+            info!("Match found! Using S3 prefix: '{}'", candidate);
+            return candidate;
+        }
+    }
+
+    info!(
+        "No matching prefix found on S3. Defaulting to folder name: '{}'",
+        folder_name
+    );
+    folder_name
+}
+
+/// Performs sync operation: uploads all files from the provided local paths to the S3 bucket.
 /// Supports both files and folders, with concurrent uploads limited by a semaphore.
 pub async fn sync_to_s3(
     client: Arc<Client>,
@@ -44,30 +177,32 @@ pub async fn sync_to_s3(
 ) -> Result<(), String> {
     update_status(&ui_handle, "Khởi tạo Sync...".to_string(), 0.0);
 
-    // Collect all files to upload
-    let mut all_files: Vec<(PathBuf, Option<(PathBuf, String)>)> = Vec::new();
+    let prefix_cache: GlobalPrefixCache = Arc::new(Mutex::new(HashMap::new()));
+
+    let mut all_files: Vec<(PathBuf, PathBuf, String)> = Vec::new();
     for local_path in &local_paths {
         let base_path = PathBuf::from(local_path);
 
         if base_path.is_file() {
-            all_files.push((base_path, None));
-        } else {
-            let folder_name = base_path
+            let file_name = base_path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let files: Vec<_> = WalkDir::new(local_path)
+            all_files.push((base_path.clone(), base_path.clone(), file_name));
+        } else {
+            let s3_prefix =
+                find_best_s3_prefix(&client, &bucket_name, &base_path, &prefix_cache).await;
+            info!(
+                "Smart Prefix Detection: Found '{}' for local path {:?}",
+                s3_prefix, base_path
+            );
+
+            let files = WalkDir::new(local_path)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
-                .map(|e| {
-                    (
-                        e.path().to_path_buf(),
-                        Some((base_path.clone(), folder_name.clone())),
-                    )
-                })
-                .collect();
+                .map(|e| (e.path().to_path_buf(), base_path.clone(), s3_prefix.clone()));
             all_files.extend(files);
         }
     }
@@ -78,16 +213,15 @@ pub async fn sync_to_s3(
         return Ok(());
     }
 
-    // Concurrent uploads (configurable via S3_SYNC_CONCURRENCY env var, default 10)
     let concurrency = std::env::var("S3_SYNC_CONCURRENCY")
-        .unwrap_or_else(|_| "10".to_string())
+        .unwrap_or_else(|_| "50".to_string())
         .parse()
-        .unwrap_or(10);
+        .unwrap_or(50);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut set = JoinSet::new();
     let completed_count = Arc::new(tokio::sync::Mutex::new(0));
 
-    for (path, folder_info) in all_files {
+    for (path, base_path, prefix) in all_files {
         let client = Arc::clone(&client);
         let semaphore = Arc::clone(&semaphore);
         let ui_handle = ui_handle.clone();
@@ -97,23 +231,17 @@ pub async fn sync_to_s3(
         set.spawn(async move {
             let _permit = semaphore.acquire().await.unwrap();
 
-            let key = if let Some((base_path, folder_name)) = folder_info {
-                let relative_path = path.strip_prefix(&base_path).unwrap_or(&path);
-                // Ensure forward slashes for S3
-                let normalized_path = relative_path.to_string_lossy().replace('\\', "/");
-                // Remove leading slash if present in relative path to avoid double slashes//
-                let clean_path = normalized_path.trim_start_matches('/');
-                format!("{}/{}", folder_name, clean_path)
+            let key = if path == base_path {
+                prefix
             } else {
-                path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
+                let relative_path = path.strip_prefix(&base_path).unwrap_or(&path);
+                let clean_path = relative_path.to_string_lossy().replace('\\', "/");
+                let clean_path = clean_path.trim_start_matches('/');
+                format!("{}/{}", prefix, clean_path)
             };
 
-            // Log mapping for user visibility
             info!("Map local file: {:?} -> S3 Key: {}", path, key);
-            let normalized_path = path
+            let display_name = path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -140,7 +268,7 @@ pub async fn sync_to_s3(
                                 &ui_handle,
                                 format!(
                                     "Đang upload: {} ({}/{})",
-                                    normalized_path, *count, total_files
+                                    display_name, *count, total_files
                                 ),
                                 progress,
                             );
@@ -155,7 +283,6 @@ pub async fn sync_to_s3(
         });
     }
 
-    // Wait for completion
     let mut has_error = false;
     while let Some(res) = set.join_next().await {
         if let Ok(Err(e)) = res {
