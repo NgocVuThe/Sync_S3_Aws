@@ -203,6 +203,7 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
 
             let ui_handle_cloned = ui_handle.clone();
 
+            let region_for_sync = region_str.clone();
             tokio::spawn(async move {
                 match create_s3_client(
                     acc_key.to_string(),
@@ -219,7 +220,7 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                     Ok(client) => {
                         let client = std::sync::Arc::new(client);
                         if let Err(e) =
-                            sync_to_s3(client, bucket_name, folders, ui_handle_cloned).await
+                            sync_to_s3(client, bucket_name, folders, acc_key.to_string(), sec_key.to_string(), sess_token.to_string(), region_for_sync, ui_handle_cloned).await
                         {
                             error!("Sync failed: {}", e);
                         }

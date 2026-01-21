@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
-use tokio::io::{AsyncBufReadExt, BufReader, AsyncReadExt};
+use tokio::io::BufReader;
 use tracing::{debug, error, info};
 use walkdir::WalkDir;
 
@@ -173,6 +173,10 @@ pub async fn sync_to_s3(
     client: Arc<Client>,
     bucket_name: String,
     local_paths: Vec<String>,
+    acc_key: String,
+    sec_key: String,
+    sess_token: String,
+    region: String,
     ui_handle: Weak<AppWindow>,
 ) -> Result<(), String> {
     update_status(&ui_handle, "Khởi tạo Sync...".to_string(), 0.0);
@@ -229,6 +233,11 @@ pub async fn sync_to_s3(
         let completed_count = Arc::clone(&completed_count);
         let ui_handle = Arc::clone(&ui_handle_arc);
 
+        let acc_key = acc_key.clone();
+        let sec_key = sec_key.clone();
+        let sess_token = sess_token.clone();
+        let region = region.clone();
+
         set.spawn(async move {
             let s3_uri = format!("s3://{}/{}", bucket_name, prefix);
             let local_path_str = base_path.to_string_lossy();
@@ -240,6 +249,19 @@ pub async fn sync_to_s3(
                 cmd.args(&["s3", "cp", &local_path_str, &s3_uri]);
             } else {
                 cmd.args(&["s3", "sync", &local_path_str, &s3_uri]);
+            }
+
+            if !acc_key.is_empty() {
+                cmd.env("AWS_ACCESS_KEY_ID", &acc_key);
+            }
+            if !sec_key.is_empty() {
+                cmd.env("AWS_SECRET_ACCESS_KEY", &sec_key);
+            }
+            if !region.is_empty() {
+                cmd.env("AWS_DEFAULT_REGION", &region);
+            }
+            if !sess_token.is_empty() {
+                cmd.env("AWS_SESSION_TOKEN", &sess_token);
             }
 
             cmd.stdout(std::process::Stdio::piped());
