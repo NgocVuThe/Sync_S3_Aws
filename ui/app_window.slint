@@ -1,5 +1,10 @@
 import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView, ComboBox } from "std-widgets.slint";
 
+export struct PathItem {
+    local-path: string,
+    s3-path: string,
+}
+
 export component AppWindow inherits Window {
     title: "RustProAI - S3 Sync Tool";
     icon: @image-url("icon_final.png");
@@ -7,7 +12,7 @@ export component AppWindow inherits Window {
     min-height: 720px;
     background: #1a1a1a;
 
-    in-out property <[string]> local-paths: [];
+    in-out property <[PathItem]> local-paths: [];
     in-out property <string> access-key;
     in-out property <string> secret-key;
     in-out property <string> session-token;
@@ -16,33 +21,99 @@ export component AppWindow inherits Window {
     in-out property <string> status-text: "Sẵn sàng";
     in-out property <float> progress: 0.0;
     in-out property <bool> show-config: true;
+    in-out property <bool> is-error: false;
+    in-out property <string> test-access-error: "";
+    in-out property <string> log-path: "";
+    in-out property <string> s3-base-path: "";
+    in-out property <bool> is-selecting-folder: false;
+    in-out property <bool> is-opening-log: false;
+    in-out property <bool> is-selecting-base-path: false;
+    in-out property <bool> show-filter-config: false;
+    in-out property <bool> enable-filtering: true;
+    in-out property <string> exclude-patterns-text: "";
+    in-out property <string> include-patterns-text: "";
+    in-out property <string> max-file-size-text: "100";
+    in-out property <string> filter-stats: "";
+    
+    settings-menu := PopupWindow {
+        x: parent.width - 180px; // Position relative to window width
+        y: 40px;
+        width: 150px;
+        height: 200px;
+        Rectangle {
+            background: white;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: #abb2bf;
+            VerticalBox {
+                padding: 10px;
+                alignment: start;
+                Button {
+                    text: "Setting Log Path";
+                    clicked => {
+                        settings-menu.close();
+                        select-log-path();
+                    }
+                }
+            }
+        }
+    }
 
     callback select-folder();
     callback select-files();
     callback clear-folders();
     callback remove-folder(int);
-    callback start-sync(string, string, string, string, string, [string]);
+    callback start-sync(string, string, string, string, string, [PathItem]);
     callback test-access(string, string, string, string, string);
+    callback open-settings();
+    callback select-log-path();
+    callback open-log-folder();
+    callback select-base-path();
+    callback toggle-filter-config();
+    callback save-filter-config();
+    callback reset-filter-config();
+    callback preview-filtering();
 
     VerticalBox {
-        padding: 30px;
-        spacing: 20px;
+        padding: 15px;
+        spacing: 12px;
 
         // Header
-        Text {
-            text: "S3 Sync Tool";
-            font-size: 28px;
-            font-weight: 800;
-            color: #61afef;
-            horizontal-alignment: center;
-        }
-
-        Text {
-            text: "Tối ưu hóa bởi RustProAI";
-            font-size: 14px;
-            font-italic: true;
-            color: #abb2bf;
-            horizontal-alignment: center;
+        HorizontalLayout {
+            height: 32px; // Fixed height to prevent icon clipping
+            Text {
+                text: "S3 Sync Tool";
+                font-size: 24px;
+                font-weight: 800;
+                color: #61afef;
+                vertical-alignment: center;
+            }
+            
+            Rectangle { horizontal-stretch: 1; } // Spacer
+            
+            // Custom Setting Button
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    background: transparent;
+                    clip: false; // Prevent clipping
+                    setting-ta := TouchArea {
+                        clicked => { settings-menu.show(); }
+                        mouse-cursor: pointer;
+                    }
+                    Text {
+                        text: "...";
+                        font-size: 20px;
+                        font-weight: 900;
+                        color: setting-ta.has-hover ? #61afef : white;
+                        animate color { duration: 150ms; }
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
         }
 
         // AWS Auth Section
@@ -51,8 +122,8 @@ export component AppWindow inherits Window {
             border-radius: 8px;
             
             VerticalBox {
-                padding: 15px;
-                spacing: 12px;
+                padding: 12px;
+                spacing: 8px;
                 
                 HorizontalBox {
                     Text { text: "AWS Configuration"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
@@ -61,11 +132,21 @@ export component AppWindow inherits Window {
                         width: 100px;
                         clicked => { show-config = true; }
                     }
+                    if (show-config) : Button {
+                        text: "Clear";
+                        width: 60px;
+                        clicked => {
+                            access-key = "";
+                            secret-key = "";
+                            session-token = "";
+                            bucket-name = "";
+                        }
+                    }
                 }
                 
                 if (show-config) : VerticalBox {
                     padding: 0;
-                    spacing: 12px;
+                    spacing: 8px;
                     LineEdit {
                         placeholder-text: "AWS Access Key ID";
                         text <=> access-key;
@@ -101,19 +182,26 @@ export component AppWindow inherits Window {
                         }
                     }
                     
-                    Button {
-                        text: "Test Access";
-                        enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
-                        clicked => {
-                            test-access(access-key, secret-key, session-token, region, bucket-name);
-                        }
-                    }
+                     Button {
+                         text: "Test Access";
+                         enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
+                         clicked => {
+                             test-access(access-key, secret-key, session-token, region, bucket-name);
+                         }
+                     }
+
+                     Text {
+                         text: test-access-error;
+                         color: #e06c75;
+                         horizontal-alignment: center;
+                         font-size: 11px;
+                     }
                 }
 
                 if (!show-config) : Text {
-                    text: "✓ Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ", Region: " + region + ")";
+                    text: "Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ")";
                     color: #98c379;
-                    font-size: 13px;
+                    font-size: 12px;
                 }
             }
         }
@@ -124,8 +212,8 @@ export component AppWindow inherits Window {
             border-radius: 8px;
             
             VerticalBox {
-                padding: 15px;
-                spacing: 12px;
+                padding: 12px;
+                spacing: 8px;
                 HorizontalBox {
                     alignment: start;
                     spacing: 15px;
@@ -141,26 +229,35 @@ export component AppWindow inherits Window {
                 Rectangle {
                     background: #21252b;
                     border-radius: 4px;
-                    height: Math.min(200px, Math.max(60px, local-paths.length * 35px + 10px));
+                    height: Math.min(180px, Math.max(60px, local-paths.length * 42px + 10px));
                     animate height { duration: 250ms; easing: ease-in-out; }
                     ScrollView {
                         VerticalBox {
                             padding: 2px;
                             spacing: 1px;
-                            for path[index] in local-paths : Rectangle {
+                            for item[index] in local-paths : Rectangle {
                                 background: #2c313a;
                                 border-radius: 2px;
                                  HorizontalLayout {
                                     padding-left: 6px;
                                     padding-right: 8px;
-                                    height: 24px;
+                                    height: 38px;
 
-                                    Text {
-                                        text: path;
-                                        vertical-alignment: center;
-                                        color: #abb2bf;
-                                        font-size: 11px;
-                                        overflow: elide;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "📁 " + item.local-path;
+                                            color: #abb2bf;
+                                            font-size: 10px;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: "➜ ☁️ " + item.s3-path;
+                                            color: #61afef;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            overflow: elide;
+                                        }
                                     }
 
                                     Rectangle { horizontal-stretch: 1; } // Fill remaining space
@@ -203,27 +300,208 @@ export component AppWindow inherits Window {
 
                 HorizontalBox {
                     alignment: start;
-                    spacing: 10px;
-                    Button {
-                        text: "Thêm Folder";
-                        height: 32px;
-                        primary: true;
-                        clicked => { select-folder() }
-                    }
-                    Button {
-                        text: "Thêm File";
-                        height: 32px;
-                        clicked => { select-files() }
-                    }
+                    spacing: 8px;
+                     Button {
+                         text: "Thêm Folder";
+                         height: 28px;
+                         primary: true;
+                         enabled: !is-selecting-folder;
+                         clicked => { select-folder() }
+                     }
+                     Button {
+                         text: "Thêm File";
+                         height: 28px;
+                         enabled: !is-selecting-folder;
+                         clicked => { select-files() }
+                     }
                     Button {
                         text: "Sync Now";
-                        height: 32px;
+                        height: 28px;
                         primary: true;
                         enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0;
                         clicked => {
                             start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths);
                         }
                     }
+                      Button {
+                          text: "Log";
+                          height: 28px;
+                          enabled: log-path != "" && !is-opening-log;
+                          clicked => { open-log-folder(); }
+                      }
+                        Button {
+                            text: "BasePath";
+                            height: 28px;
+                            enabled: !is-selecting-base-path;
+                            clicked => { select-base-path(); }
+                        }
+                 }
+
+                 if (is-selecting-folder) : Text {
+                     text: "Đang tính toán đường dẫn S3...";
+                     color: #61afef;
+                     font-size: 11px;
+                     horizontal-alignment: center;
+                 }
+
+                 if (s3-base-path != "") : HorizontalLayout {
+                    padding-left: 10px;
+                    height: 18px;
+                    
+                    Text {
+                        text: "📁 BasePath: " + s3-base-path;
+                        color: #98c379;
+                        font-size: 10px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Filter Configuration Section (Moved to Bottom)
+        Rectangle {
+            background: #282c34;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+                
+                HorizontalBox {
+                    Text { text: "File Filtering"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    if (!show-filter-config) : Button {
+                        text: "Cấu hình";
+                        width: 80px;
+                        height: 24px;
+                        clicked => { toggle-filter-config() }
+                    }
+                    if (show-filter-config) : Button {
+                        text: "Ẩn";
+                        width: 60px;
+                        height: 24px;
+                        clicked => { toggle-filter-config() }
+                    }
+                }
+                
+                if (show-filter-config) : VerticalBox {
+                    padding: 0;
+                    spacing: 8px;
+                    
+                    // Enable Filtering Toggle
+                    HorizontalBox {
+                        spacing: 10px;
+                        Text { text: "Bật lọc file:"; color: #abb2bf; vertical-alignment: center; }
+                        Rectangle {
+                            width: 34px;
+                            height: 18px;
+                            background: enable-filtering ? #61afef : #3e4451;
+                            border-radius: 9px;
+                            TouchArea {
+                                clicked => { enable-filtering = !enable-filtering; }
+                                mouse-cursor: pointer;
+                            }
+                            Rectangle {
+                                x: enable-filtering ? 18px : 2px;
+                                width: 14px;
+                                height: 14px;
+                                background: white;
+                                border-radius: 7px;
+                                y: 2px;
+                                animate x { duration: 150ms; }
+                            }
+                        }
+                    }
+                    
+                    if (enable-filtering) : VerticalBox {
+                        padding: 0;
+                        spacing: 8px;
+                        
+                        // Max File Size
+                        HorizontalBox {
+                            spacing: 10px;
+                            Text { text: "Max size (MB):"; color: #abb2bf; vertical-alignment: center; min-width: 100px; font-size: 11px; }
+                            LineEdit {
+                                text <=> max-file-size-text;
+                                width: 60px;
+                                height: 22px;
+                                placeholder-text: "100";
+                            }
+                        }
+                        
+                        // Exclude Patterns
+                        VerticalBox {
+                            spacing: 4px;
+                            Text { text: "Exclude (ngăn cách bằng dấu phẩy):"; color: #abb2bf; font-size: 11px; }
+                            Rectangle {
+                                background: #21252b;
+                                border-radius: 4px;
+                                LineEdit {
+                                    text <=> exclude-patterns-text;
+                                    placeholder-text: "node_modules, *.tmp, .git";
+                                    font-size: 11px;
+                                    height: 24px;
+                                }
+                            }
+                        }
+                        
+                        // Include Patterns
+                        VerticalBox {
+                            spacing: 4px;
+                            Text { text: "Include (ngăn cách bằng dấu phẩy):"; color: #abb2bf; font-size: 11px; }
+                            Rectangle {
+                                background: #21252b;
+                                border-radius: 4px;
+                                LineEdit {
+                                    text <=> include-patterns-text;
+                                    placeholder-text: "*.html, *.css, *.js";
+                                    font-size: 11px;
+                                    height: 24px;
+                                }
+                            }
+                        }
+                        
+                        // Action Buttons
+                        HorizontalBox {
+                            spacing: 8px;
+                            alignment: start;
+                            Button {
+                                text: "Xem trước";
+                                height: 24px;
+                                clicked => { preview-filtering() }
+                            }
+                            Button {
+                                text: "Lưu";
+                                height: 24px;
+                                primary: true;
+                                clicked => { save-filter-config() }
+                            }
+                            Button {
+                                text: "Reset";
+                                height: 24px;
+                                clicked => { reset-filter-config() }
+                            }
+                        }
+                        
+                        // Filter Statistics
+                        if (filter-stats != "") : Rectangle {
+                            background: #21252b;
+                            border-radius: 4px;
+                            padding: 6px;
+                            Text {
+                                text: filter-stats;
+                                color: #98c379;
+                                font-size: 10px;
+                            }
+                        }
+                    }
+                }
+                
+                if (!show-filter-config && enable-filtering) : Text {
+                    text: "Lọc file đang bật";
+                    color: #98c379;
+                    font-size: 11px;
                 }
             }
         }
@@ -233,7 +511,7 @@ export component AppWindow inherits Window {
             spacing: 8px;
             Text {
                 text: status-text;
-                color: #98c379;
+                color: is-error ? #e06c75 : #98c379;
                 horizontal-alignment: center;
                 overflow: elide;
             }
@@ -256,3 +534,4 @@ export component AppWindow inherits Window {
 
     }
 }
+
