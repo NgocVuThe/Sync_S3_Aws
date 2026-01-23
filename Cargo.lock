@@ -4974,6 +4974,7 @@ dependencies = [
  "aws-sdk-s3",
  "chrono",
  "confy",
+ "glob",
  "mime_guess",
  "rfd",
  "serde",
