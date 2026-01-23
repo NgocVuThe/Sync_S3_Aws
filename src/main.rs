@@ -1,9 +1,12 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use tracing::info;
 use tracing_appender;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use rust_project::*;
 
+mod config;
 mod s3_client;
 mod ui_handlers;
 mod utils;
@@ -21,7 +24,17 @@ async fn main() -> Result<(), anyhow::Error> {
         .init();
 
     info!("Ứng dụng S3 Sync Tool đang khởi động...");
+    
+    // Load saved config
+    let app_config = config::load_config();
+    info!("Config loaded from: {:?}", config::get_config_path());
+    
     let ui = AppWindow::new()?;
+    
+    // Apply saved log_path to UI
+    if !app_config.log_path.is_empty() {
+        ui.set_log_path(app_config.log_path.into());
+    }
 
     ui_handlers::setup_all_handlers(&ui);
 

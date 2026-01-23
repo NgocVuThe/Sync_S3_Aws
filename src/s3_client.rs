@@ -2,8 +2,11 @@ use crate::*;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
+use chrono::{Local, Datelike};
 use slint::Weak;
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
@@ -174,11 +177,15 @@ pub async fn sync_to_s3(
     bucket_name: String,
     local_paths: Vec<String>,
     ui_handle: Weak<AppWindow>,
+    log_path: String,
 ) -> Result<(), String> {
-    update_status(&ui_handle, "Khởi tạo Sync...".to_string(), 0.0);
+    update_status(&ui_handle, "Khởi tạo Sync...".to_string(), 0.0, false);
+
+    let should_log = !log_path.is_empty() && !cfg!(debug_assertions);
+    let start_time = Local::now();
+    let mut mappings: Vec<String> = Vec::new();
 
     let prefix_cache: GlobalPrefixCache = Arc::new(Mutex::new(HashMap::new()));
-
     let mut all_files: Vec<(PathBuf, PathBuf, String)> = Vec::new();
     for local_path in &local_paths {
         let base_path = PathBuf::from(local_path);
@@ -197,6 +204,7 @@ pub async fn sync_to_s3(
                 "Smart Prefix Detection: Found '{}' for local path {:?}",
                 s3_prefix, base_path
             );
+            mappings.push(format!("Local: {} -> S3 Folder: {}", local_path, s3_prefix));
 
             let files = WalkDir::new(local_path)
                 .into_iter()
@@ -207,9 +215,18 @@ pub async fn sync_to_s3(
         }
     }
 
+    if should_log && !mappings.is_empty() {
+        let log_file = format!("{}/sync_log_{:02}_{:02}_{}.log", log_path, start_time.day(), start_time.month(), start_time.year());
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_file) {
+            for mapping in &mappings {
+                let _ = writeln!(file, "{}", mapping);
+            }
+        }
+    }
+
     let total_files = all_files.len();
     if total_files == 0 {
-        update_status(&ui_handle, "Không có file nào để upload!".to_string(), 1.0);
+        update_status(&ui_handle, "Không có file nào để upload!".to_string(), 1.0, false);
         return Ok(());
     }
 
@@ -271,6 +288,7 @@ pub async fn sync_to_s3(
                                     display_name, *count, total_files
                                 ),
                                 progress,
+                                false,
                             );
                             debug!("Uploaded: {}", key);
                             Ok(())
@@ -287,7 +305,7 @@ pub async fn sync_to_s3(
     while let Some(res) = set.join_next().await {
         if let Ok(Err(e)) = res {
             error!("{}", e);
-            update_status(&ui_handle, format!("Lỗi: {}", e), 0.0);
+            update_status(&ui_handle, format!("Lỗi: {}", e), 0.0, true);
             has_error = true;
             set.abort_all();
             break;
@@ -295,7 +313,17 @@ pub async fn sync_to_s3(
     }
 
     if !has_error {
-        update_status(&ui_handle, "Đồng bộ hoàn tất!".to_string(), 1.0);
+        update_status(&ui_handle, "Đồng bộ hoàn tất!".to_string(), 1.0, false);
+    }
+
+    if should_log {
+        let end_time = Local::now();
+        let status = if !has_error { "success" } else { "failed" };
+        let log_file = format!("{}/sync_log_{:02}_{:02}_{}.log", log_path, start_time.day(), start_time.month(), start_time.year());
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_file) {
+            let _ = writeln!(file, "Time Upload: {}, Status: {}", end_time.format("%Y-%m-%d %H:%M:%S"), status);
+            let _ = writeln!(file, "--------------------------------------------------");
+        }
     }
 
     Ok(())

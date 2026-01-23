@@ -2,7 +2,7 @@ import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView, ComboBox } fr
 
 export component AppWindow inherits Window {
     title: "RustProAI - S3 Sync Tool";
-    icon: @image-url("../icon_final.png");
+    icon: @image-url("icon_final.png");
     min-width: 500px;
     min-height: 720px;
     background: #1a1a1a;
@@ -16,6 +16,35 @@ export component AppWindow inherits Window {
     in-out property <string> status-text: "Sẵn sàng";
     in-out property <float> progress: 0.0;
     in-out property <bool> show-config: true;
+    in-out property <bool> is-error: false;
+    in-out property <string> test-access-error: "";
+    in-out property <string> log_path: "";
+    in-out property <bool> is_selecting_folder: false;
+    in-out property <bool> is_opening_log: false;
+    
+    settings-menu := PopupWindow {
+        x: 320px; // Adjusted for smaller width
+        y: 40px; // Adjusted for higher header
+        width: 150px;
+        height: 200px;
+        Rectangle {
+            background: white;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: #abb2bf;
+            VerticalBox {
+                padding: 10px;
+                alignment: start;
+                Button {
+                    text: "Setting Log Path";
+                    clicked => {
+                        settings-menu.close();
+                        select-log-path();
+                    }
+                }
+            }
+        }
+    }
 
     callback select-folder();
     callback select-files();
@@ -23,26 +52,50 @@ export component AppWindow inherits Window {
     callback remove-folder(int);
     callback start-sync(string, string, string, string, string, [string]);
     callback test-access(string, string, string, string, string);
+    callback open-settings();
+    callback select-log-path();
+    callback open-log-folder();
 
     VerticalBox {
-        padding: 30px;
-        spacing: 20px;
+        padding: 15px;
+        spacing: 12px;
 
         // Header
-        Text {
-            text: "S3 Sync Tool";
-            font-size: 28px;
-            font-weight: 800;
-            color: #61afef;
-            horizontal-alignment: center;
-        }
-
-        Text {
-            text: "Tối ưu hóa bởi RustProAI";
-            font-size: 14px;
-            font-italic: true;
-            color: #abb2bf;
-            horizontal-alignment: center;
+        HorizontalLayout {
+            height: 32px; // Fixed height to prevent icon clipping
+            Text {
+                text: "S3 Sync Tool";
+                font-size: 24px;
+                font-weight: 800;
+                color: #61afef;
+                vertical-alignment: center;
+            }
+            
+            Rectangle { horizontal-stretch: 1; } // Spacer
+            
+            // Custom Setting Button
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    background: transparent;
+                    clip: false; // Prevent clipping
+                    setting-ta := TouchArea {
+                        clicked => { settings-menu.show(); }
+                        mouse-cursor: pointer;
+                    }
+                    Text {
+                        text: "...";
+                        font-size: 20px;
+                        font-weight: 900;
+                        color: setting-ta.has-hover ? #61afef : white;
+                        animate color { duration: 150ms; }
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
         }
 
         // AWS Auth Section
@@ -60,6 +113,16 @@ export component AppWindow inherits Window {
                         text: "Chỉnh sửa";
                         width: 100px;
                         clicked => { show-config = true; }
+                    }
+                    if (show-config) : Button {
+                        text: "Clear";
+                        width: 60px;
+                        clicked => {
+                            access-key = "";
+                            secret-key = "";
+                            session-token = "";
+                            bucket-name = "";
+                        }
                     }
                 }
                 
@@ -101,17 +164,24 @@ export component AppWindow inherits Window {
                         }
                     }
                     
-                    Button {
-                        text: "Test Access";
-                        enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
-                        clicked => {
-                            test-access(access-key, secret-key, session-token, region, bucket-name);
-                        }
-                    }
+                     Button {
+                         text: "Test Access";
+                         enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
+                         clicked => {
+                             test-access(access-key, secret-key, session-token, region, bucket-name);
+                         }
+                     }
+
+                     Text {
+                         text: test-access-error;
+                         color: #e06c75;
+                         horizontal-alignment: center;
+                         font-size: 12px;
+                     }
                 }
 
                 if (!show-config) : Text {
-                    text: "✓ Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ", Region: " + region + ")";
+                    text: "Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ", Region: " + region + ")";
                     color: #98c379;
                     font-size: 13px;
                 }
@@ -204,17 +274,19 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     alignment: start;
                     spacing: 10px;
-                    Button {
-                        text: "Thêm Folder";
-                        height: 32px;
-                        primary: true;
-                        clicked => { select-folder() }
-                    }
-                    Button {
-                        text: "Thêm File";
-                        height: 32px;
-                        clicked => { select-files() }
-                    }
+                     Button {
+                         text: "Thêm Folder";
+                         height: 32px;
+                         primary: true;
+                         enabled: !is_selecting_folder;
+                         clicked => { select-folder() }
+                     }
+                     Button {
+                         text: "Thêm File";
+                         height: 32px;
+                         enabled: !is_selecting_folder;
+                         clicked => { select-files() }
+                     }
                     Button {
                         text: "Sync Now";
                         height: 32px;
@@ -224,6 +296,12 @@ export component AppWindow inherits Window {
                             start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths);
                         }
                     }
+                     Button {
+                         text: "Log";
+                         height: 32px;
+                         enabled: log_path != "" && !is_opening_log;
+                         clicked => { open-log-folder(); }
+                     }
                 }
             }
         }
@@ -233,7 +311,7 @@ export component AppWindow inherits Window {
             spacing: 8px;
             Text {
                 text: status-text;
-                color: #98c379;
+                color: is-error ? #e06c75 : #98c379;
                 horizontal-alignment: center;
                 overflow: elide;
             }

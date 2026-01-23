@@ -14,6 +14,9 @@ fn main() {
     {
         let mut res = winres::WindowsResource::new();
         res.set_icon("ui/app_icon.ico");
+        res.set("FileDescription", "Rust S3 Sync Tool");
+        res.set("ProductName", "S3 Sync Tool");
+        res.set("OriginalFilename", "rust_project.exe");
         res.compile().unwrap();
     }
 }

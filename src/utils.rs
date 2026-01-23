@@ -56,10 +56,16 @@ pub fn validate_credentials(acc_key: &str, sec_key: &str, bucket: &str) -> Optio
 
 /// Updates the UI status text and progress bar.
 /// Must be called from within an event loop.
-pub fn update_status(ui_handle: &slint::Weak<AppWindow>, text: String, progress: f32) {
+pub fn update_status(
+    ui_handle: &slint::Weak<AppWindow>,
+    text: String,
+    progress: f32,
+    is_error: bool,
+) {
     let _ = ui_handle.upgrade_in_event_loop(move |ui| {
         ui.set_status_text(text.into());
         ui.set_progress(progress);
+        ui.set_is_error(is_error);
     });
 }
 

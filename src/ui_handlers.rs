@@ -4,6 +4,7 @@ use rfd;
 use slint::{Model, ModelRc, VecModel};
 use std::rc::Rc;
 use tokio;
+use tokio::time;
 use tracing::{error, info};
 
 use crate::s3_client::{create_s3_client, sync_to_s3, test_bucket_access};
@@ -19,7 +20,8 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
             // Validate inputs
             if let Some(err) = crate::utils::validate_credentials(&acc_key, &sec_key, &bucket_name)
             {
-                crate::utils::update_status(&ui_handle, err, 0.0);
+                crate::utils::update_status(&ui_handle, err.clone(), 0.0, true);
+                let _ = ui_handle.upgrade_in_event_loop(|ui| ui.set_test_access_error(err.into()));
                 return;
             }
 
@@ -41,7 +43,9 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                     &ui_handle_cloned,
                     "Đang kiểm tra kết nối...".to_string(),
                     0.1,
+                    false,
                 );
+                let _ = ui_handle_cloned.upgrade_in_event_loop(|ui| ui.set_test_access_error("".into()));
                 match create_s3_client(
                     acc_key.to_string(),
                     sec_key.to_string(),
@@ -63,7 +67,9 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                                 &ui_handle_cloned,
                                 "Kết nối thành công!".to_string(),
                                 1.0,
+                                false,
                             );
+                            let _ = ui_handle_cloned.upgrade_in_event_loop(|ui| ui.set_test_access_error("".into()));
                         }
                         Err(e) => {
                             error!("Test Access thất bại: {:?}", e);
@@ -71,7 +77,9 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                                 &ui_handle_cloned,
                                 format!("Lỗi: {}", e),
                                 0.0,
+                                true,
                             );
+                            let _ = ui_handle_cloned.upgrade_in_event_loop(move |ui| ui.set_test_access_error(format!("Lỗi: {}", e).into()));
                         }
                     },
                     Err(e) => {
@@ -80,7 +88,9 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                             &ui_handle_cloned,
                             format!("Lỗi tạo client: {}", e),
                             0.0,
+                            true,
                         );
+                        let _ = ui_handle_cloned.upgrade_in_event_loop(move |ui| ui.set_test_access_error(format!("Lỗi tạo client: {}", e).into()));
                     }
                 }
             });
@@ -93,6 +103,10 @@ pub fn setup_select_folder_handler(ui: &AppWindow) {
     ui.on_select_folder({
         let ui_handle = ui.as_weak();
         move || {
+            let ui_handle_cloned = ui_handle.clone();
+            let _ = ui_handle_cloned.upgrade_in_event_loop(|ui| {
+                ui.set_is_selecting_folder(true);
+            });
             if let Some(paths) = rfd::FileDialog::new().pick_folders() {
                 let _ = ui_handle.upgrade_in_event_loop(move |ui| {
                     let mut current_paths: Vec<slint::SharedString> = ui
@@ -105,6 +119,11 @@ pub fn setup_select_folder_handler(ui: &AppWindow) {
                     }
                     let model = Rc::new(VecModel::from(current_paths));
                     ui.set_local_paths(ModelRc::from(model));
+                    ui.set_is_selecting_folder(false);
+                });
+            } else {
+                let _ = ui_handle.upgrade_in_event_loop(|ui| {
+                    ui.set_is_selecting_folder(false);
                 });
             }
         }
@@ -116,6 +135,10 @@ pub fn setup_select_files_handler(ui: &AppWindow) {
     ui.on_select_files({
         let ui_handle = ui.as_weak();
         move || {
+            let ui_handle_cloned = ui_handle.clone();
+            let _ = ui_handle_cloned.upgrade_in_event_loop(|ui| {
+                ui.set_is_selecting_folder(true);
+            });
             if let Some(paths) = rfd::FileDialog::new().pick_files() {
                 let _ = ui_handle.upgrade_in_event_loop(move |ui| {
                     let mut current_paths: Vec<slint::SharedString> = ui
@@ -128,6 +151,11 @@ pub fn setup_select_files_handler(ui: &AppWindow) {
                     }
                     let model = Rc::new(VecModel::from(current_paths));
                     ui.set_local_paths(ModelRc::from(model));
+                    ui.set_is_selecting_folder(false);
+                });
+            } else {
+                let _ = ui_handle.upgrade_in_event_loop(|ui| {
+                    ui.set_is_selecting_folder(false);
                 });
             }
         }
@@ -184,11 +212,12 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                 .iter()
                 .map(|s: slint::SharedString| s.to_string())
                 .collect();
+            let log_path = ui_handle.upgrade().map(|ui| ui.get_log_path().to_string()).unwrap_or_default();
 
             // Validate inputs
             if let Some(err) = crate::utils::validate_credentials(&acc_key, &sec_key, &bucket_name)
             {
-                crate::utils::update_status(&ui_handle, err, 0.0);
+                crate::utils::update_status(&ui_handle, err, 0.0, true);
                 return;
             }
 
@@ -197,6 +226,7 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                     &ui_handle,
                     "Không có file hoặc thư mục nào để upload".to_string(),
                     0.0,
+                    true,
                 );
                 return;
             }
@@ -219,7 +249,7 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                     Ok(client) => {
                         let client = std::sync::Arc::new(client);
                         if let Err(e) =
-                            sync_to_s3(client, bucket_name, folders, ui_handle_cloned).await
+                            sync_to_s3(client, bucket_name, folders, ui_handle_cloned, log_path).await
                         {
                             error!("Sync failed: {}", e);
                         }
@@ -230,10 +260,68 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                             &ui_handle_cloned,
                             format!("Lỗi tạo client: {}", e),
                             0.0,
+                            true,
                         );
                     }
                 }
             });
+        }
+    });
+}
+
+pub fn setup_select_log_path_handler(ui: &AppWindow) {
+    let ui_handle = ui.as_weak();
+    ui.on_select_log_path(move || {
+        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+            let path_str = path.to_string_lossy().to_string();
+            
+            // Save to config file
+            let config = crate::config::AppConfig {
+                log_path: path_str.clone(),
+            };
+            if let Err(e) = crate::config::save_config(&config) {
+                error!("Failed to save config: {:?}", e);
+            } else {
+                info!("Config saved: log_path = {}", path_str);
+            }
+            
+            let _ = ui_handle.upgrade_in_event_loop(move |ui| {
+                ui.set_log_path(path_str.into());
+            });
+        }
+    });
+}
+
+pub fn setup_open_log_folder_handler(ui: &AppWindow) {
+    let ui_handle = ui.as_weak();
+    ui.on_open_log_folder(move || {
+        if let Some(ui) = ui_handle.upgrade() {
+            let log_path = ui.get_log_path().to_string();
+            if !log_path.is_empty() {
+                let ui_handle_cloned = ui_handle.clone();
+                let _ = ui_handle_cloned.upgrade_in_event_loop(|ui| {
+                    ui.set_is_opening_log(true);
+                });
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("explorer").arg(&log_path).spawn();
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open").arg(&log_path).spawn();
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = std::process::Command::new("xdg-open").arg(&log_path).spawn();
+                }
+                let ui_handle_for_reset = ui_handle.clone();
+                tokio::spawn(async move {
+                    time::sleep(time::Duration::from_millis(500)).await;
+                    let _ = ui_handle_for_reset.upgrade_in_event_loop(|ui| {
+                        ui.set_is_opening_log(false);
+                    });
+                });
+            }
         }
     });
 }
@@ -246,4 +334,6 @@ pub fn setup_all_handlers(ui: &AppWindow) {
     setup_clear_folders_handler(ui);
     setup_remove_folder_handler(ui);
     setup_start_sync_handler(ui);
+    setup_select_log_path_handler(ui);
+    setup_open_log_folder_handler(ui);
 }
