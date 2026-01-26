@@ -50,6 +50,10 @@ async fn main() -> Result<(), anyhow::Error> {
     ui.set_include_patterns_text(include_text.into());
     ui.set_max_file_size_text(max_size_text.into());
 
+    if !app_config.selected_bucket.is_empty() {
+        ui.set_bucket_name(app_config.selected_bucket.into());
+    }
+
     ui_handlers::setup_all_handlers(&ui);
 
     ui.run()?;

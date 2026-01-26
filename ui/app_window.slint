@@ -35,11 +35,20 @@ export component AppWindow inherits Window {
     in-out property <string> max-file-size-text: "100";
     in-out property <string> filter-stats: "";
     
+    // Bucket Management Properties
+    in-out property <[string]> bucket-list: [];
+    in-out property <string> new-bucket-name: "";
+    in-out property <int> editing-bucket-index: -1; // -1 for new, >=0 for editing
+    in-out property <string> bucket-manager-error: "";
+    in-out property <bool> show-confirm-delete: false;
+    in-out property <int> bucket-to-delete-index: -1;
+    in-out property <string> bucket-to-delete-name: "";
+
     settings-menu := PopupWindow {
         x: parent.width - 180px; // Position relative to window width
         y: 40px;
         width: 150px;
-        height: 200px;
+        height: 100px; // Reduced height as it only has 2 buttons
         Rectangle {
             background: white;
             border-radius: 4px;
@@ -48,11 +57,22 @@ export component AppWindow inherits Window {
             VerticalBox {
                 padding: 10px;
                 alignment: start;
+                spacing: 5px;
                 Button {
                     text: "Setting Log Path";
                     clicked => {
                         settings-menu.close();
                         select-log-path();
+                    }
+                }
+                Button {
+                    text: "Manage Buckets";
+                    clicked => {
+                        settings-menu.close();
+                        bucket-manager-error = "";
+                        new-bucket-name = "";
+                        editing-bucket-index = -1;
+                        bucket-manager.show();
                     }
                 }
             }
@@ -73,6 +93,197 @@ export component AppWindow inherits Window {
     callback save-filter-config();
     callback reset-filter-config();
     callback preview-filtering();
+
+    // Bucket management callbacks
+    callback add-bucket(string);
+    callback update-bucket(int, string);
+    callback delete-bucket(int);
+
+    bucket-manager := PopupWindow {
+        x: (parent.width - 450px) / 2;
+        y: (parent.height - 400px) / 2;
+        width: 450px;
+        height: 400px;
+        Rectangle {
+            background: #282c34;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #61afef;
+            
+            VerticalBox {
+                padding: 15px;
+                spacing: 12px;
+                
+                HorizontalLayout {
+                    Text {
+                        text: "Manage S3 Buckets";
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: #61afef;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        text: "X";
+                        width: 30px;
+                        clicked => { bucket-manager.close(); }
+                    }
+                }
+
+                Rectangle {
+                    background: #21252b;
+                    border-radius: 4px;
+                    height: 200px;
+                    ScrollView {
+                        VerticalBox {
+                            padding: 5px;
+                            spacing: 5px;
+                            alignment: start;
+                            for bucket[index] in bucket-list : Rectangle {
+                                height: 40px;
+                                background: #2c313a;
+                                border-radius: 4px;
+                                HorizontalBox {
+                                    padding: 5px;
+                                    Text {
+                                        text: bucket;
+                                        color: #abb2bf;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+                                    Button {
+                                        text: "Edit";
+                                        width: 50px;
+                                        clicked => {
+                                            new-bucket-name = bucket;
+                                            editing-bucket-index = index;
+                                            bucket-manager-error = "";
+                                        }
+                                    }
+                                    Button {
+                                        text: "Delete";
+                                        width: 60px;
+                                        clicked => {
+                                            bucket-to-delete-index = index;
+                                            bucket-to-delete-name = bucket;
+                                            show-confirm-delete = true;
+                                            confirm-delete-dialog.show();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                VerticalBox {
+                    spacing: 5px;
+                    padding: 0;
+                    Text {
+                        text: editing-bucket-index >= 0 ? "Edit Bucket Name:" : "Add New Bucket:";
+                        color: #e5c07b;
+                        font-size: 12px;
+                    }
+                    HorizontalBox {
+                        padding: 0;
+                        spacing: 10px;
+                        LineEdit {
+                            text <=> new-bucket-name;
+                            placeholder-text: "bucket-name-here";
+                            font-size: 13px;
+                            accepted => {
+                                if (editing-bucket-index >= 0) {
+                                    update-bucket(editing-bucket-index, new-bucket-name);
+                                } else {
+                                    add-bucket(new-bucket-name);
+                                }
+                            }
+                        }
+                        Button {
+                            text: editing-bucket-index >= 0 ? "Update" : "Add";
+                            primary: true;
+                            width: 80px;
+                            clicked => {
+                                if (editing-bucket-index >= 0) {
+                                    update-bucket(editing-bucket-index, new-bucket-name);
+                                } else {
+                                    add-bucket(new-bucket-name);
+                                }
+                            }
+                        }
+                        if (editing-bucket-index >= 0) : Button {
+                            text: "Cancel";
+                            width: 70px;
+                            clicked => {
+                                editing-bucket-index = -1;
+                                new-bucket-name = "";
+                                bucket-manager-error = "";
+                            }
+                        }
+                    }
+                }
+
+                if (bucket-manager-error != "") : Text {
+                    text: bucket-manager-error;
+                    color: #e06c75;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+
+    confirm-delete-dialog := PopupWindow {
+        x: (parent.width - 350px) / 2;
+        y: (parent.height - 150px) / 2;
+        width: 350px;
+        height: 150px;
+        Rectangle {
+            background: #282c34;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #e06c75;
+            VerticalBox {
+                padding: 20px;
+                spacing: 15px;
+                Text {
+                    text: "Delete Bucket?";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: #e06c75;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Are you sure you want to delete '" + bucket-to-delete-name + "'?";
+                    color: #abb2bf;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                HorizontalBox {
+                    alignment: center;
+                    spacing: 20px;
+                    Button {
+                        text: "Cancel";
+                        width: 80px;
+                        clicked => {
+                            confirm-delete-dialog.close();
+                            show-confirm-delete = false;
+                        }
+                    }
+                    Button {
+                        text: "Delete";
+                        primary: true;
+                        width: 80px;
+                        clicked => {
+                            delete-bucket(bucket-to-delete-index);
+                            confirm-delete-dialog.close();
+                            show-confirm-delete = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     VerticalBox {
         padding: 15px;
@@ -172,12 +383,7 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         Text { text: "Bucket:"; color: #abb2bf; vertical-alignment: center; }
                         ComboBox {
-                            model: [
-                                "ien-corp-dev-contents",
-                                "i-ocean-global-stg-contents",
-                                "i-ocean-global-prod-contents",
-                                "ien-corp-prod-contents"
-                            ];
+                            model: bucket-list;
                             current-value <=> bucket-name;
                         }
                     }

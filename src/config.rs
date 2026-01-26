@@ -58,6 +58,15 @@ fn default_true() -> bool {
     true
 }
 
+fn default_buckets() -> Vec<String> {
+    vec![
+        "ien-corp-dev-contents".to_string(),
+        "i-ocean-global-stg-contents".to_string(),
+        "i-ocean-global-prod-contents".to_string(),
+        "ien-corp-prod-contents".to_string(),
+    ]
+}
+
 impl Default for FilterConfig {
     fn default() -> Self {
         Self {
@@ -77,6 +86,10 @@ pub struct AppConfig {
     pub s3_base_path: String,
     #[serde(default)]
     pub filter_config: FilterConfig,
+    #[serde(default = "default_buckets")]
+    pub buckets: Vec<String>,
+    #[serde(default)]
+    pub selected_bucket: String,
 }
 
 /// Load config from file. Returns default if file doesn't exist or is invalid.

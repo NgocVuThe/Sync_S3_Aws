@@ -19,6 +19,7 @@ chrono = { version = "0.4", features = ["serde"] }
 confy = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 glob = "0.3"
+regex = "1.12.2"
 
 [build-dependencies]
 slint-build = "1.9.0"

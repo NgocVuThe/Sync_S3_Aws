@@ -17,6 +17,11 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
             let bucket_name = bucket.to_string();
             let region_str = region.to_string();
 
+            // Save selected bucket to config
+            let mut config = crate::config::load_config();
+            config.selected_bucket = bucket_name.clone();
+            let _ = crate::config::save_config(&config);
+
             // Validate inputs
             if let Some(err) = crate::utils::validate_credentials(&acc_key, &sec_key, &bucket_name)
             {
@@ -332,6 +337,11 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                 .map(|item: PathItem| (item.local_path.to_string(), item.s3_path.to_string()))
                 .collect();
             let log_path = ui_handle.upgrade().map(|ui| ui.get_log_path().to_string()).unwrap_or_default();
+
+            // Save selected bucket to config
+            let mut config = crate::config::load_config();
+            config.selected_bucket = bucket_name.clone();
+            let _ = crate::config::save_config(&config);
 
             // Validate inputs
             if let Some(err) = crate::utils::validate_credentials(&acc_key, &sec_key, &bucket_name)
@@ -740,6 +750,135 @@ pub fn setup_preview_filtering_handler(ui: &AppWindow) {
     });
 }
 
+pub fn setup_bucket_handlers(ui: &AppWindow) {
+    let ui_handle = ui.as_weak();
+
+    // Load initial bucket list
+    let config = crate::config::load_config();
+    let initial_buckets: Vec<slint::SharedString> = config
+        .buckets
+        .iter()
+        .map(|s| slint::SharedString::from(s.clone()))
+        .collect();
+    ui.set_bucket_list(ModelRc::from(Rc::new(VecModel::from(initial_buckets))));
+
+    // Helper to refresh bucket list in UI and save to config
+    let refresh_buckets = {
+        let ui_handle = ui_handle.clone();
+        move |buckets: Vec<String>| {
+            let shared_buckets: Vec<slint::SharedString> = buckets
+                .iter()
+                .map(|s| slint::SharedString::from(s.clone()))
+                .collect();
+            
+            // Save to config
+            let mut config = crate::config::load_config();
+            config.buckets = buckets;
+            if let Err(e) = crate::config::save_config(&config) {
+                error!("Failed to save bucket config: {:?}", e);
+            }
+
+            let _ = ui_handle.upgrade_in_event_loop(move |ui| {
+                ui.set_bucket_list(ModelRc::from(Rc::new(VecModel::from(shared_buckets))));
+            });
+        }
+    };
+
+    // Validation helper
+    let validate_bucket_name = |name: &str, current_buckets: &[String], skip_index: Option<usize>| -> Result<(), String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Bucket name cannot be empty".to_string());
+        }
+
+        // AWS Bucket naming rules (simplified)
+        // https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
+        if trimmed.len() < 3 || trimmed.len() > 63 {
+            return Err("Bucket name must be between 3 and 63 characters long".to_string());
+        }
+
+        let re = regex::Regex::new(r"^[a-z0-9][a-z0-9.-]*[a-z0-9]$").unwrap();
+        if !re.is_match(trimmed) {
+            return Err("Invalid characters (only a-z, 0-9, . and - allowed, must start/end with letter/digit)".to_string());
+        }
+
+        for (i, b) in current_buckets.iter().enumerate() {
+            if Some(i) != skip_index && b == trimmed {
+                return Err("Bucket name already exists".to_string());
+            }
+        }
+
+        Ok(())
+    };
+
+    // Add bucket
+    ui.on_add_bucket({
+        let ui_handle = ui_handle.clone();
+        let refresh_buckets = refresh_buckets.clone();
+        move |name| {
+            let ui = ui_handle.unwrap();
+            let mut config = crate::config::load_config();
+            
+            match validate_bucket_name(&name, &config.buckets, None) {
+                Ok(_) => {
+                    config.buckets.push(name.trim().to_string());
+                    refresh_buckets(config.buckets);
+                    ui.set_new_bucket_name("".into());
+                    ui.set_bucket_manager_error("".into());
+                }
+                Err(e) => {
+                    ui.set_bucket_manager_error(e.into());
+                }
+            }
+        }
+    });
+
+    // Update bucket
+    ui.on_update_bucket({
+        let ui_handle = ui_handle.clone();
+        let refresh_buckets = refresh_buckets.clone();
+        move |index, name| {
+            let ui = ui_handle.unwrap();
+            let mut config = crate::config::load_config();
+            let idx = index as usize;
+            
+            if idx >= config.buckets.len() { return; }
+
+            match validate_bucket_name(&name, &config.buckets, Some(idx)) {
+                Ok(_) => {
+                    config.buckets[idx] = name.trim().to_string();
+                    refresh_buckets(config.buckets);
+                    ui.set_new_bucket_name("".into());
+                    ui.set_editing_bucket_index(-1);
+                    ui.set_bucket_manager_error("".into());
+                }
+                Err(e) => {
+                    ui.set_bucket_manager_error(e.into());
+                }
+            }
+        }
+    });
+
+    // Delete bucket
+    ui.on_delete_bucket({
+        let ui_handle = ui_handle.clone();
+        let refresh_buckets = refresh_buckets.clone();
+        move |index| {
+            let ui = ui_handle.unwrap();
+            let mut config = crate::config::load_config();
+            let idx = index as usize;
+            
+            if idx < config.buckets.len() {
+                config.buckets.remove(idx);
+                refresh_buckets(config.buckets);
+                ui.set_bucket_manager_error("".into());
+                // If the deleted bucket was selected, clear it
+                // Note: Slint might handle this if ComboBox is bound, but let's be safe
+            }
+        }
+    });
+}
+
 /// Convenience function to set up all UI handlers.
 pub fn setup_all_handlers(ui: &AppWindow) {
     setup_test_access_handler(ui);
@@ -755,4 +894,5 @@ pub fn setup_all_handlers(ui: &AppWindow) {
     setup_save_filter_config_handler(ui);
     setup_reset_filter_config_handler(ui);
     setup_preview_filtering_handler(ui);
+    setup_bucket_handlers(ui);
 }

@@ -4976,6 +4976,7 @@ dependencies = [
  "confy",
  "glob",
  "mime_guess",
+ "regex",
  "rfd",
  "serde",
  "slint",
