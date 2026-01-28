@@ -1,0 +1,28 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Theme } from "../shared/colors.slint";
+
+export component ProgressStatus inherits VerticalBox {
+    in property <string> status-text;
+    in property <float> progress;
+    in property <bool> is-error;
+
+    spacing: 8px;
+    Text { 
+        text: status-text; 
+        color: is-error ? Theme.accent-red : Theme.accent-green; 
+        horizontal-alignment: center; 
+        overflow: elide; 
+    }
+    Rectangle { 
+        background: Theme.bg-tertiary; 
+        height: 6px; 
+        border-radius: 3px; 
+        Rectangle { 
+            x: 0; 
+            width: parent.width * progress; 
+            background: Theme.accent-blue; 
+            border-radius: 3px; 
+            animate width { duration: 250ms; } 
+        } 
+    }
+}

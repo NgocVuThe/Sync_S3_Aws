@@ -1,0 +1,164 @@
+import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Theme } from "../shared/colors.slint";
+
+export component RegionManagerDialog inherits Rectangle {
+    in-out property <[string]> region-list;
+    in-out property <string> new-name;
+    in-out property <int> editing-index: -1;
+    in-out property <string> error-message;
+    in-out property <bool> show-add-input: false;
+    
+    callback add-region(string);
+    callback update-region(int, string);
+    callback delete-clicked(int, string);
+    callback close();
+
+    background: #000000cc;
+    TouchArea { } 
+
+    Rectangle {
+        x: (parent.width - 480px) / 2;
+        height: Math.min(550px, 120px + Math.min(300px, region-list.length * 60px) + (show-add-input ? 100px : 60px) + (error-message != "" ? 30px : 0px));
+        y: (parent.height - self.height) / 2;
+        width: 480px;
+        background: Theme.bg-tertiary;
+        border-radius: 12px;
+        border-width: 2px;
+        border-color: Theme.border-default;
+        animate height { duration: 200ms; easing: ease-in-out; }
+        
+        VerticalBox {
+            padding: 24px;
+            spacing: 20px;
+            
+            HorizontalLayout {
+                alignment: center;
+                height: 32px;
+                Text { text: "Manage S3 Regions"; font-size: 20px; font-weight: 800; color: Theme.accent-blue; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 22px; height: 22px;
+                        border-radius: 11px;
+                        border-width: 1px;
+                        border-color: close-reg-ta.has-hover ? Theme.accent-red : Theme.text-secondary;
+                        background: close-reg-ta.has-hover ? #e06c7522 : transparent;
+                        animate background, border-color { duration: 150ms; }
+                        close-reg-ta := TouchArea { clicked => { close(); } mouse-cursor: pointer; }
+                        Text { text: "X"; font-size: 12px; font-weight: 700; color: close-reg-ta.has-hover ? Theme.accent-red : Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+
+            Rectangle {
+                background: Theme.bg-secondary;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.border-default;
+                height: Math.min(300px, region-list.length * 60px + 20px);
+                animate height { duration: 200ms; }
+                
+                ScrollView {
+                    VerticalBox {
+                        padding: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        for reg[index] in region-list : Rectangle {
+                            height: 50px;
+                            background: Theme.bg-card;
+                            border-radius: 6px;
+                            HorizontalLayout {
+                                padding: 8px;
+                                spacing: 12px;
+                                
+                                if (editing-index == index) : VerticalLayout {
+                                    alignment: center;
+                                    LineEdit {
+                                        text <=> new-name;
+                                        font-size: 14px;
+                                        height: 32px;
+                                        accepted => { update-region(index, new-name); }
+                                    }
+                                }
+                                if (editing-index == index) : VerticalLayout {
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Save"; primary: true; width: 65px; height: 32px;
+                                            clicked => { update-region(index, new-name); }
+                                        }
+                                        Button {
+                                            text: "Esc"; width: 55px; height: 32px;
+                                            clicked => { editing-index = -1; new-name = ""; }
+                                        }
+                                    }
+                                }
+
+                                if (editing-index != index) : Text {
+                                    text: reg; color: Theme.text-primary; font-size: 14px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+                                }
+                                if (editing-index != index) : VerticalLayout {
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Edit"; width: 55px; height: 32px;
+                                            clicked => { new-name = reg; editing-index = index; }
+                                        }
+                                        Button {
+                                            text: "Del"; width: 55px; height: 32px;
+                                            clicked => { delete-clicked(index, reg); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 12px;
+                alignment: center;
+                
+                if (!show-add-input) : HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 48px; height: 48px; background: add-reg-btn-ta.has-hover ? Theme.accent-blue : Theme.border-default; border-radius: 24px;
+                        animate background { duration: 200ms; }
+                        add-reg-btn-ta := TouchArea { clicked => { show-add-input = true; new-name = ""; error-message = ""; } mouse-cursor: pointer; }
+                        Text { text: "+"; font-size: 32px; color: add-reg-btn-ta.has-hover ? Theme.bg-secondary : white; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                
+                if (show-add-input) : HorizontalLayout {
+                    spacing: 12px;
+                    alignment: center;
+                    LineEdit {
+                        text <=> new-name; placeholder-text: "Region code (e.g. us-east-1)..."; horizontal-stretch: 1; height: 40px;
+                        accepted => { add-region(new-name); }
+                    }
+                    Button { text: "Add"; primary: true; width: 80px; height: 40px; clicked => { add-region(new-name); } }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 28px; height: 28px;
+                            border-radius: 14px;
+                            border-width: 1px;
+                            border-color: cancel-add-reg-ta.has-hover ? Theme.accent-red : Theme.border-default;
+                            background: cancel-add-reg-ta.has-hover ? #e06c7522 : transparent;
+                            animate background, border-color { duration: 150ms; }
+                            cancel-add-reg-ta := TouchArea { clicked => { show-add-input = false; new-name = ""; } mouse-cursor: pointer; }
+                            Text { text: "X"; font-size: 14px; font-weight: 700; color: cancel-add-reg-ta.has-hover ? Theme.accent-red : white; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+
+            if (error-message != "") : Text { text: error-message; color: Theme.accent-red; font-size: 13px; font-weight: 500; horizontal-alignment: center; }
+        }
+    }
+}

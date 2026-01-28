@@ -1,0 +1,35 @@
+import { Theme } from "../shared/colors.slint";
+
+export component Header inherits HorizontalLayout {
+    callback settings-clicked();
+    
+    height: 32px;
+    
+    Text {
+        text: "S3 Sync Tool";
+        font-size: 24px;
+        font-weight: 800;
+        color: Theme.accent-blue;
+        vertical-alignment: center;
+    }
+    Rectangle { horizontal-stretch: 1; }
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 28px; height: 28px;
+            background: transparent;
+            setting-ta := TouchArea {
+                clicked => { settings-clicked(); }
+                mouse-cursor: pointer;
+            }
+            Text {
+                text: "...";
+                font-size: 20px;
+                font-weight: 900;
+                color: setting-ta.has-hover ? Theme.accent-blue : white;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

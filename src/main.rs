@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tracing::info;
-use tracing_appender;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use rust_project::*;
@@ -53,6 +52,16 @@ async fn main() -> Result<(), anyhow::Error> {
     if !app_config.selected_bucket.is_empty() {
         ui.set_bucket_name(app_config.selected_bucket.into());
     }
+    if !app_config.selected_region.is_empty() {
+        ui.set_region(app_config.selected_region.into());
+    }
+
+    // Set lists for ComboBoxes
+    let bucket_model = slint::VecModel::from(app_config.buckets.iter().map(|s| s.clone().into()).collect::<Vec<slint::SharedString>>());
+    ui.set_bucket_list(slint::ModelRc::from(std::rc::Rc::new(bucket_model)));
+
+    let region_model = slint::VecModel::from(app_config.regions.iter().map(|s| s.clone().into()).collect::<Vec<slint::SharedString>>());
+    ui.set_region_list(slint::ModelRc::from(std::rc::Rc::new(region_model)));
 
     ui_handlers::setup_all_handlers(&ui);
 

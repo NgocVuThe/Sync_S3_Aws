@@ -1,6 +1,5 @@
 use crate::*;
 use glob::Pattern;
-use mime_guess;
 use std::fs;
 use std::path::Path;
 
@@ -123,7 +122,7 @@ fn matches_pattern(path_str: &str, file_name: &str, pattern: &str) -> bool {
         }
     }
 
-    // Check if pattern is a directory name
+    // Simple substring match for non-glob patterns
     if !pattern.contains('*') && !pattern.contains('?') {
         if path_str.contains(pattern) || file_name.contains(pattern) {
             return true;
@@ -365,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_filtering_stats() {
-        let config = FilterConfig::default();
+        let _config = FilterConfig::default();
 
         // This test would require a real directory structure
         // For now, just test the default values
