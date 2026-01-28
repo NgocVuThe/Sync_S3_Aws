@@ -1,0 +1,46 @@
+import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Theme } from "../shared/colors.slint";
+
+export component ConfirmDeleteDialog inherits Rectangle {
+    in property <string> title: "Delete?";
+    in property <string> message;
+    in property <string> item-name;
+    
+    callback confirm();
+    callback cancel();
+    
+    background: #000000cc;
+    
+    // Block clicks behind
+    TouchArea { }
+
+    Rectangle {
+        x: (parent.width - 380px) / 2;
+        y: (parent.height - 180px) / 2;
+        width: 380px;
+        height: 180px;
+        background: Theme.bg-tertiary;
+        border-radius: 12px;
+        border-width: 2px;
+        border-color: Theme.accent-red;
+        
+        VerticalBox {
+            padding: 24px;
+            spacing: 20px;
+            Text { text: title; font-size: 18px; font-weight: 800; color: Theme.accent-red; horizontal-alignment: center; }
+            Text { 
+                text: message + " '" + item-name + "'?"; 
+                color: Theme.text-secondary; 
+                horizontal-alignment: center; 
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            HorizontalBox {
+                alignment: center;
+                spacing: 24px;
+                Button { text: "Cancel"; width: 100px; height: 36px; clicked => { cancel(); } }
+                Button { text: "Delete"; primary: true; width: 100px; height: 36px; clicked => { confirm(); } }
+            }
+        }
+    }
+}

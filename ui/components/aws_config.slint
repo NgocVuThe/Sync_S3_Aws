@@ -1,0 +1,70 @@
+import { Button, VerticalBox, LineEdit, HorizontalBox, ComboBox } from "std-widgets.slint";
+import { Theme } from "../shared/colors.slint";
+
+export component AwsConfigSection inherits Rectangle {
+    in-out property <string> access-key;
+    in-out property <string> secret-key;
+    in-out property <string> session-token;
+    in-out property <string> region;
+    in-out property <string> bucket-name;
+    in property <[string]> region-list;
+    in property <[string]> bucket-list;
+    in-out property <bool> show-config: true;
+    in property <string> test-access-error;
+    
+    callback test-access(string, string, string, string, string);
+    
+    background: Theme.bg-secondary;
+    border-radius: 8px;
+
+    VerticalBox {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalBox {
+            Text { text: "AWS Configuration"; color: Theme.accent-yellow; font-weight: 700; vertical-alignment: center; }
+            if (!show-config) : Button {
+                text: "Chỉnh sửa";
+                width: 100px;
+                clicked => { show-config = true; }
+            }
+            if (show-config) : Button {
+                text: "Clear";
+                width: 60px;
+                clicked => {
+                    access-key = "";
+                    secret-key = "";
+                    session-token = "";
+                    bucket-name = "";
+                }
+            }
+        }
+        if (show-config) : VerticalBox {
+            padding: 0;
+            spacing: 8px;
+            LineEdit { placeholder-text: "AWS Access Key ID"; text <=> access-key; }
+            LineEdit { placeholder-text: "AWS Secret Access Key"; input-type: password; text <=> secret-key; }
+            LineEdit { placeholder-text: "AWS Session Token (Optional)"; text <=> session-token; }
+            HorizontalBox {
+                spacing: 10px;
+                Text { text: "Region:"; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox { model: region-list; current-value <=> region; }
+            }
+            HorizontalBox {
+                spacing: 10px;
+                Text { text: "Bucket:"; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox { model: bucket-list; current-value <=> bucket-name; }
+            }
+            Button {
+                text: "Test Access";
+                enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
+                clicked => { test-access(access-key, secret-key, session-token, region, bucket-name); }
+            }
+            Text { text: test-access-error; color: Theme.accent-red; horizontal-alignment: center; font-size: 11px; }
+        }
+        if (!show-config) : Text {
+            text: "Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ")";
+            color: Theme.accent-green;
+            font-size: 12px;
+        }
+    }
+}

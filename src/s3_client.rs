@@ -7,7 +7,7 @@ use slint::Weak;
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
@@ -187,14 +187,14 @@ pub fn get_preview_prefix(path: &std::path::Path) -> String {
 pub async fn find_best_s3_prefix(
     client: &Client,
     bucket: &str,
-    local_path: &PathBuf,
+    local_path: &Path,
     cache: &GlobalPrefixCache,
 ) -> String {
     let default_prefix = get_preview_prefix(local_path);
 
     // Try to find a longer match on S3 if possible, with FIXED logic
     let normalized = local_path.to_string_lossy().replace('\\', "/");
-    let parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty() && !s.contains(':')).collect();
+    let parts: Vec<&str> = normalized.split('/').filter(|s: &&str| !s.is_empty() && !s.contains(':')).collect();
     let n = parts.len();
     
     for i in 0..n {
@@ -202,11 +202,10 @@ pub async fn find_best_s3_prefix(
 
         if is_s3_prefix_exists_cached(client, bucket, &candidate, cache).await {
             // FIXED: Check if candidate is a PROPER prefix of default
-            if candidate.split('/').count() == 1 && default_prefix.contains('/') {
-                if !default_prefix.starts_with(&candidate) && !default_prefix.contains(&format!("{}/", candidate)) {
+if candidate.split('/').count() == 1 && default_prefix.contains('/')
+                && !default_prefix.starts_with(&candidate) && !default_prefix.contains(&format!("{}/", candidate)) {
                     continue;
                 }
-            }
             info!("Smart Match found on S3: '{}'", candidate);
             return candidate;
         }
@@ -252,7 +251,7 @@ pub async fn sync_to_s3(
         let local_path_buf = PathBuf::from(&local_path);
 
         if local_path_buf.is_file() {
-            if crate::utils::should_include_file(&local_path_buf, &local_path_buf.parent().unwrap_or(&local_path_buf), &filter_config) {
+            if crate::utils::should_include_file(&local_path_buf, local_path_buf.parent().unwrap_or(&local_path_buf), &filter_config) {
                 log_mappings.push(format!("File: {} -> S3: {}", local_path, s3_prefix));
                 all_files.push((local_path_buf.clone(), local_path_buf.clone(), s3_prefix));
             } else {

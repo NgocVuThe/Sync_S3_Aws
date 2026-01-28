@@ -1,17 +1,31 @@
 import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView, ComboBox } from "std-widgets.slint";
 
-export struct PathItem {
-    local-path: string,
-    s3-path: string,
-}
+// Shared
+import { PathItem } from "shared/types.slint";
+import { Theme } from "shared/colors.slint";
+
+// Components
+import { Header } from "components/header.slint";
+import { AwsConfigSection } from "components/aws_config.slint";
+import { FolderPickerSection } from "components/folder_picker.slint";
+import { FilterConfigSection } from "components/filter_config.slint";
+import { ProgressStatus } from "components/progress_bar.slint";
+
+// Dialogs
+import { BucketManagerDialog } from "dialogs/bucket_manager.slint";
+import { RegionManagerDialog } from "dialogs/region_manager.slint";
+import { ConfirmDeleteDialog } from "dialogs/confirm_delete.slint";
+
+export { PathItem }
 
 export component AppWindow inherits Window {
     title: "RustProAI - S3 Sync Tool";
     icon: @image-url("icon_final.png");
     min-width: 500px;
     min-height: 720px;
-    background: #1a1a1a;
+    background: Theme.bg-primary;
 
+    // --- Properties (accessed from Rust) ---
     in-out property <[PathItem]> local-paths: [];
     in-out property <string> access-key;
     in-out property <string> secret-key;
@@ -35,30 +49,29 @@ export component AppWindow inherits Window {
     in-out property <string> max-file-size-text: "100";
     in-out property <string> filter-stats: "";
     
-    settings-menu := PopupWindow {
-        x: parent.width - 180px; // Position relative to window width
-        y: 40px;
-        width: 150px;
-        height: 200px;
-        Rectangle {
-            background: white;
-            border-radius: 4px;
-            border-width: 1px;
-            border-color: #abb2bf;
-            VerticalBox {
-                padding: 10px;
-                alignment: start;
-                Button {
-                    text: "Setting Log Path";
-                    clicked => {
-                        settings-menu.close();
-                        select-log-path();
-                    }
-                }
-            }
-        }
-    }
+    // Bucket Management Properties
+    in-out property <[string]> bucket-list: [];
+    in-out property <string> new-bucket-name: "";
+    in-out property <int> editing-bucket-index: -1;
+    in-out property <string> bucket-manager-error: "";
+    in-out property <bool> show-confirm-delete: false;
+    in-out property <int> bucket-to-delete-index: -1;
+    in-out property <string> bucket-to-delete-name: "";
+    in-out property <bool> show-bucket-manager: false;
+    in-out property <bool> show-add-input: false;
 
+    // Region Management Properties
+    in-out property <[string]> region-list: ["ap-northeast-1"];
+    in-out property <string> new-region-name: "";
+    in-out property <int> editing-region-index: -1;
+    in-out property <string> region-manager-error: "";
+    in-out property <bool> show-confirm-delete-region: false;
+    in-out property <int> region-to-delete-index: -1;
+    in-out property <string> region-to-delete-name: "";
+    in-out property <bool> show-region-manager: false;
+    in-out property <bool> show-add-region-input: false;
+
+    // --- Callbacks ---
     callback select-folder();
     callback select-files();
     callback clear-folders();
@@ -74,464 +87,183 @@ export component AppWindow inherits Window {
     callback reset-filter-config();
     callback preview-filtering();
 
+    // Bucket management callbacks
+    callback add-bucket(string);
+    callback update-bucket(int, string);
+    callback delete-bucket(int);
+
+    // Region management callbacks
+    callback add-region(string);
+    callback update-region(int, string);
+    callback delete-region(int);
+
+    // Settings Menu Popup
+    settings-menu := PopupWindow {
+        x: parent.width - 180px;
+        y: 40px;
+        width: 150px;
+        height: 140px;
+        Rectangle {
+            background: white;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: #abb2bf;
+            VerticalBox {
+                padding: 10px;
+                alignment: start;
+                spacing: 5px;
+                Button {
+                    text: "Setting Log Path";
+                    clicked => {
+                        settings-menu.close();
+                        select-log-path();
+                    }
+                }
+                Button {
+                    text: "Manage Buckets";
+                    clicked => {
+                        settings-menu.close();
+                        bucket-manager-error = "";
+                        new-bucket-name = "";
+                        editing-bucket-index = -1;
+                        show-add-input = false;
+                        show-bucket-manager = true;
+                    }
+                }
+                Button {
+                    text: "Manage Regions";
+                    clicked => {
+                        settings-menu.close();
+                        region-manager-error = "";
+                        new-region-name = "";
+                        editing-region-index = -1;
+                        show-add-region-input = false;
+                        show-region-manager = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Main Layout ---
     VerticalBox {
         padding: 15px;
         spacing: 12px;
 
-        // Header
-        HorizontalLayout {
-            height: 32px; // Fixed height to prevent icon clipping
-            Text {
-                text: "S3 Sync Tool";
-                font-size: 24px;
-                font-weight: 800;
-                color: #61afef;
-                vertical-alignment: center;
-            }
-            
-            Rectangle { horizontal-stretch: 1; } // Spacer
-            
-            // Custom Setting Button
-            VerticalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 28px;
-                    height: 28px;
-                    background: transparent;
-                    clip: false; // Prevent clipping
-                    setting-ta := TouchArea {
-                        clicked => { settings-menu.show(); }
-                        mouse-cursor: pointer;
-                    }
-                    Text {
-                        text: "...";
-                        font-size: 20px;
-                        font-weight: 900;
-                        color: setting-ta.has-hover ? #61afef : white;
-                        animate color { duration: 150ms; }
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-            }
+        Header {
+            settings-clicked => { settings-menu.show(); }
         }
 
-        // AWS Auth Section
-        Rectangle {
-            background: #282c34;
-            border-radius: 8px;
-            
-            VerticalBox {
-                padding: 12px;
-                spacing: 8px;
-                
-                HorizontalBox {
-                    Text { text: "AWS Configuration"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
-                    if (!show-config) : Button {
-                        text: "Chỉnh sửa";
-                        width: 100px;
-                        clicked => { show-config = true; }
-                    }
-                    if (show-config) : Button {
-                        text: "Clear";
-                        width: 60px;
-                        clicked => {
-                            access-key = "";
-                            secret-key = "";
-                            session-token = "";
-                            bucket-name = "";
-                        }
-                    }
-                }
-                
-                if (show-config) : VerticalBox {
-                    padding: 0;
-                    spacing: 8px;
-                    LineEdit {
-                        placeholder-text: "AWS Access Key ID";
-                        text <=> access-key;
-                    }
-                    LineEdit {
-                        placeholder-text: "AWS Secret Access Key";
-                        input-type: password;
-                        text <=> secret-key;
-                    }
-                    LineEdit {
-                        placeholder-text: "AWS Session Token (Optional)";
-                        text <=> session-token;
-                    }
-                    HorizontalBox {
-                        spacing: 10px;
-                        Text { text: "Region:"; color: #abb2bf; vertical-alignment: center; }
-                        ComboBox {
-                            model: ["ap-northeast-1"];
-                            current-value <=> region;
-                        }
-                    }
-                    HorizontalBox {
-                        spacing: 10px;
-                        Text { text: "Bucket:"; color: #abb2bf; vertical-alignment: center; }
-                        ComboBox {
-                            model: [
-                                "ien-corp-dev-contents",
-                                "i-ocean-global-stg-contents",
-                                "i-ocean-global-prod-contents",
-                                "ien-corp-prod-contents"
-                            ];
-                            current-value <=> bucket-name;
-                        }
-                    }
-                    
-                     Button {
-                         text: "Test Access";
-                         enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
-                         clicked => {
-                             test-access(access-key, secret-key, session-token, region, bucket-name);
-                         }
-                     }
-
-                     Text {
-                         text: test-access-error;
-                         color: #e06c75;
-                         horizontal-alignment: center;
-                         font-size: 11px;
-                     }
-                }
-
-                if (!show-config) : Text {
-                    text: "Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ")";
-                    color: #98c379;
-                    font-size: 12px;
-                }
-            }
+        AwsConfigSection {
+            access-key <=> root.access-key;
+            secret-key <=> root.secret-key;
+            session-token <=> root.session-token;
+            region <=> root.region;
+            bucket-name <=> root.bucket-name;
+            region-list: root.region-list;
+            bucket-list: root.bucket-list;
+            show-config <=> root.show-config;
+            test-access-error: root.test-access-error;
+            test-access(a, s, t, r, b) => { root.test-access(a, s, t, r, b); }
         }
 
-        // Folder Selection Section
-        Rectangle {
-            background: #282c34;
-            border-radius: 8px;
+        FolderPickerSection {
+            local-paths: root.local-paths;
+            is-selecting-folder: root.is-selecting-folder;
+            is-selecting-base-path: root.is-selecting-base-path;
+            s3-base-path: root.s3-base-path;
+            access-key: root.access-key;
+            secret-key: root.secret-key;
+            session-token: root.session-token;
+            region: root.region;
+            bucket-name: root.bucket-name;
+            has-log-path: root.log-path != "";
+            is-opening-log: root.is-opening-log;
             
-            VerticalBox {
-                padding: 12px;
-                spacing: 8px;
-                HorizontalBox {
-                    alignment: start;
-                    spacing: 15px;
-                    Text { text: "Local Folders/Files"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
-                    Button {
-                        text: "Xóa hết";
-                        width: 80px;
-                        height: 24px;
-                        clicked => { clear-folders() }
-                    }
-                }
-                
-                Rectangle {
-                    background: #21252b;
-                    border-radius: 4px;
-                    height: Math.min(180px, Math.max(60px, local-paths.length * 42px + 10px));
-                    animate height { duration: 250ms; easing: ease-in-out; }
-                    ScrollView {
-                        VerticalBox {
-                            padding: 2px;
-                            spacing: 1px;
-                            for item[index] in local-paths : Rectangle {
-                                background: #2c313a;
-                                border-radius: 2px;
-                                 HorizontalLayout {
-                                    padding-left: 6px;
-                                    padding-right: 8px;
-                                    height: 38px;
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        Text {
-                                            text: "📁 " + item.local-path;
-                                            color: #abb2bf;
-                                            font-size: 10px;
-                                            overflow: elide;
-                                        }
-                                        Text {
-                                            text: "➜ ☁️ " + item.s3-path;
-                                            color: #61afef;
-                                            font-size: 10px;
-                                            font-weight: 700;
-                                            overflow: elide;
-                                        }
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; } // Fill remaining space
-
-                                    VerticalLayout {
-                                        alignment: center;
-                                        Rectangle {
-                                            width: 16px;
-                                            height: 16px;
-                                            background: remove-ta.has-hover ? #4b5263 : #3e4451;
-                                            border-radius: 8px;
-                                            animate background { duration: 150ms; }
-                                            
-                                            remove-ta := TouchArea {
-                                                clicked => { remove-folder(index) }
-                                                mouse-cursor: pointer;
-                                            }
-
-                                            Text {
-                                                text: "X";
-                                                color: remove-ta.has-hover ? #ff7070 : #e06c75;
-                                                font-size: 8px;
-                                                font-weight: 1000;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if (local-paths.length == 0) : Text {
-                                text: "Chưa chọn thư mục/file nào...";
-                                color: #5c6370;
-                                font-italic: true;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-                }
-
-                HorizontalBox {
-                    alignment: start;
-                    spacing: 8px;
-                     Button {
-                         text: "Thêm Folder";
-                         height: 28px;
-                         primary: true;
-                         enabled: !is-selecting-folder;
-                         clicked => { select-folder() }
-                     }
-                     Button {
-                         text: "Thêm File";
-                         height: 28px;
-                         enabled: !is-selecting-folder;
-                         clicked => { select-files() }
-                     }
-                    Button {
-                        text: "Sync Now";
-                        height: 28px;
-                        primary: true;
-                        enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0;
-                        clicked => {
-                            start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths);
-                        }
-                    }
-                      Button {
-                          text: "Log";
-                          height: 28px;
-                          enabled: log-path != "" && !is-opening-log;
-                          clicked => { open-log-folder(); }
-                      }
-                        Button {
-                            text: "BasePath";
-                            height: 28px;
-                            enabled: !is-selecting-base-path;
-                            clicked => { select-base-path(); }
-                        }
-                 }
-
-                 if (is-selecting-folder) : Text {
-                     text: "Đang tính toán đường dẫn S3...";
-                     color: #61afef;
-                     font-size: 11px;
-                     horizontal-alignment: center;
-                 }
-
-                 if (s3-base-path != "") : HorizontalLayout {
-                    padding-left: 10px;
-                    height: 18px;
-                    
-                    Text {
-                        text: "📁 BasePath: " + s3-base-path;
-                        color: #98c379;
-                        font-size: 10px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-                }
-            }
+            select-folder => { root.select-folder(); }
+            select-files => { root.select-files(); }
+            clear-folders => { root.clear-folders(); }
+            remove-folder(idx) => { root.remove-folder(idx); }
+            start-sync(a, s, t, r, b, paths) => { root.start-sync(a, s, t, r, b, paths); }
+            open-log-folder => { root.open-log-folder(); }
+            select-base-path => { root.select-base-path(); }
         }
 
-        // Filter Configuration Section (Moved to Bottom)
-        Rectangle {
-            background: #282c34;
-            border-radius: 8px;
+        FilterConfigSection {
+            show-filter-config <=> root.show-filter-config;
+            enable-filtering <=> root.enable-filtering;
+            max-file-size-text <=> root.max-file-size-text;
+            exclude-patterns-text <=> root.exclude-patterns-text;
+            include-patterns-text <=> root.include-patterns-text;
+            filter-stats: root.filter-stats;
             
-            VerticalBox {
-                padding: 12px;
-                spacing: 8px;
-                
-                HorizontalBox {
-                    Text { text: "File Filtering"; color: #e5c07b; font-weight: 700; vertical-alignment: center; }
-                    Rectangle { horizontal-stretch: 1; }
-                    if (!show-filter-config) : Button {
-                        text: "Cấu hình";
-                        width: 80px;
-                        height: 24px;
-                        clicked => { toggle-filter-config() }
-                    }
-                    if (show-filter-config) : Button {
-                        text: "Ẩn";
-                        width: 60px;
-                        height: 24px;
-                        clicked => { toggle-filter-config() }
-                    }
-                }
-                
-                if (show-filter-config) : VerticalBox {
-                    padding: 0;
-                    spacing: 8px;
-                    
-                    // Enable Filtering Toggle
-                    HorizontalBox {
-                        spacing: 10px;
-                        Text { text: "Bật lọc file:"; color: #abb2bf; vertical-alignment: center; }
-                        Rectangle {
-                            width: 34px;
-                            height: 18px;
-                            background: enable-filtering ? #61afef : #3e4451;
-                            border-radius: 9px;
-                            TouchArea {
-                                clicked => { enable-filtering = !enable-filtering; }
-                                mouse-cursor: pointer;
-                            }
-                            Rectangle {
-                                x: enable-filtering ? 18px : 2px;
-                                width: 14px;
-                                height: 14px;
-                                background: white;
-                                border-radius: 7px;
-                                y: 2px;
-                                animate x { duration: 150ms; }
-                            }
-                        }
-                    }
-                    
-                    if (enable-filtering) : VerticalBox {
-                        padding: 0;
-                        spacing: 8px;
-                        
-                        // Max File Size
-                        HorizontalBox {
-                            spacing: 10px;
-                            Text { text: "Max size (MB):"; color: #abb2bf; vertical-alignment: center; min-width: 100px; font-size: 11px; }
-                            LineEdit {
-                                text <=> max-file-size-text;
-                                width: 60px;
-                                height: 22px;
-                                placeholder-text: "100";
-                            }
-                        }
-                        
-                        // Exclude Patterns
-                        VerticalBox {
-                            spacing: 4px;
-                            Text { text: "Exclude (ngăn cách bằng dấu phẩy):"; color: #abb2bf; font-size: 11px; }
-                            Rectangle {
-                                background: #21252b;
-                                border-radius: 4px;
-                                LineEdit {
-                                    text <=> exclude-patterns-text;
-                                    placeholder-text: "node_modules, *.tmp, .git";
-                                    font-size: 11px;
-                                    height: 24px;
-                                }
-                            }
-                        }
-                        
-                        // Include Patterns
-                        VerticalBox {
-                            spacing: 4px;
-                            Text { text: "Include (ngăn cách bằng dấu phẩy):"; color: #abb2bf; font-size: 11px; }
-                            Rectangle {
-                                background: #21252b;
-                                border-radius: 4px;
-                                LineEdit {
-                                    text <=> include-patterns-text;
-                                    placeholder-text: "*.html, *.css, *.js";
-                                    font-size: 11px;
-                                    height: 24px;
-                                }
-                            }
-                        }
-                        
-                        // Action Buttons
-                        HorizontalBox {
-                            spacing: 8px;
-                            alignment: start;
-                            Button {
-                                text: "Xem trước";
-                                height: 24px;
-                                clicked => { preview-filtering() }
-                            }
-                            Button {
-                                text: "Lưu";
-                                height: 24px;
-                                primary: true;
-                                clicked => { save-filter-config() }
-                            }
-                            Button {
-                                text: "Reset";
-                                height: 24px;
-                                clicked => { reset-filter-config() }
-                            }
-                        }
-                        
-                        // Filter Statistics
-                        if (filter-stats != "") : Rectangle {
-                            background: #21252b;
-                            border-radius: 4px;
-                            padding: 6px;
-                            Text {
-                                text: filter-stats;
-                                color: #98c379;
-                                font-size: 10px;
-                            }
-                        }
-                    }
-                }
-                
-                if (!show-filter-config && enable-filtering) : Text {
-                    text: "Lọc file đang bật";
-                    color: #98c379;
-                    font-size: 11px;
-                }
-            }
+            toggle-filter-config => { root.toggle-filter-config(); }
+            preview-filtering => { root.preview-filtering(); }
+            save-filter-config => { root.save-filter-config(); }
+            reset-filter-config => { root.reset-filter-config(); }
         }
 
-        // Progress & Status
-        VerticalBox {
-            spacing: 8px;
-            Text {
-                text: status-text;
-                color: is-error ? #e06c75 : #98c379;
-                horizontal-alignment: center;
-                overflow: elide;
-            }
-            
-            // Custom Progress Bar
-            Rectangle {
-                background: #21252b;
-                height: 6px;
-                border-radius: 3px;
-                Rectangle {
-                    x: 0;
-                    width: parent.width * progress;
-                    background: #61afef;
-                    border-radius: 3px;
-                    animate width { duration: 250ms; easing: ease-in-out; }
-                }
-            }
+        ProgressStatus {
+            status-text: root.status-text;
+            progress: root.progress;
+            is-error: root.is-error;
         }
+    }
 
+    // --- Dialogs ---
+    if (show-bucket-manager) : BucketManagerDialog {
+        bucket-list: root.bucket-list;
+        new-name <=> root.new-bucket-name;
+        editing-index <=> root.editing-bucket-index;
+        error-message: root.bucket-manager-error;
+        show-add-input <=> root.show-add-input;
+        
+        add-bucket(name) => { root.add-bucket(name); }
+        update-bucket(idx, name) => { root.update-bucket(idx, name); }
+        delete-clicked(idx, name) => { 
+            root.bucket-to-delete-index = idx;
+            root.bucket-to-delete-name = name;
+            root.show-confirm-delete = true;
+        }
+        close => { show-bucket-manager = false; }
+    }
 
+    if (show-confirm-delete) : ConfirmDeleteDialog {
+        title: "Delete Bucket?";
+        message: "Confirm delete";
+        item-name: root.bucket-to-delete-name;
+        confirm => {
+            root.delete-bucket(root.bucket-to-delete-index);
+            root.show-confirm-delete = false;
+        }
+        cancel => { root.show-confirm-delete = false; }
+    }
+
+    if (show-region-manager) : RegionManagerDialog {
+        region-list: root.region-list;
+        new-name <=> root.new-region-name;
+        editing-index <=> root.editing-region-index;
+        error-message: root.region-manager-error;
+        show-add-input <=> root.show-add-region-input;
+        
+        add-region(name) => { root.add-region(name); }
+        update-region(idx, name) => { root.update-region(idx, name); }
+        delete-clicked(idx, name) => {
+            root.region-to-delete-index = idx;
+            root.region-to-delete-name = name;
+            root.show-confirm-delete-region = true;
+        }
+        close => { show-region-manager = false; }
+    }
+
+    if (show-confirm-delete-region) : ConfirmDeleteDialog {
+        title: "Delete Region?";
+        message: "Confirm delete";
+        item-name: root.region-to-delete-name;
+        confirm => {
+            root.delete-region(root.region-to-delete-index);
+            root.show-confirm-delete-region = false;
+        }
+        cancel => { root.show-confirm-delete-region = false; }
     }
 }
-

@@ -1,0 +1,65 @@
+import { Button, VerticalBox, LineEdit, HorizontalBox } from "std-widgets.slint";
+import { Theme } from "../shared/colors.slint";
+
+export component FilterConfigSection inherits Rectangle {
+    in-out property <bool> show-filter-config: false;
+    in-out property <bool> enable-filtering: true;
+    in-out property <string> max-file-size-text: "100";
+    in-out property <string> exclude-patterns-text: "";
+    in-out property <string> include-patterns-text: "";
+    in property <string> filter-stats: "";
+
+    callback toggle-filter-config();
+    callback preview-filtering();
+    callback save-filter-config();
+    callback reset-filter-config();
+
+    background: Theme.bg-secondary;
+    border-radius: 8px;
+
+    VerticalBox {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalBox {
+            Text { text: "File Filtering"; color: Theme.accent-yellow; font-weight: 700; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: show-filter-config ? "Ẩn" : "Cấu hình"; width: 80px; height: 24px; clicked => { toggle-filter-config() } }
+        }
+        if (show-filter-config) : VerticalBox {
+            padding: 0;
+            spacing: 8px;
+            HorizontalBox {
+                spacing: 10px;
+                Text { text: "Bật lọc file:"; color: Theme.text-secondary; vertical-alignment: center; }
+                Rectangle {
+                    width: 34px; height: 18px; background: enable-filtering ? Theme.accent-blue : Theme.border-default; border-radius: 9px;
+                    TouchArea { clicked => { enable-filtering = !enable-filtering; } mouse-cursor: pointer; }
+                    Rectangle { x: enable-filtering ? 18px : 2px; width: 14px; height: 14px; background: white; border-radius: 7px; y: 2px; animate x { duration: 150ms; } }
+                }
+            }
+            if (enable-filtering) : VerticalBox {
+                padding: 0;
+                spacing: 8px;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text { text: "Max size (MB):"; color: Theme.text-secondary; vertical-alignment: center; min-width: 100px; font-size: 11px; }
+                    LineEdit { text <=> max-file-size-text; width: 60px; height: 22px; }
+                }
+                VerticalBox { spacing: 4px; Text { text: "Exclude:"; color: Theme.text-secondary; font-size: 11px; } LineEdit { text <=> exclude-patterns-text; height: 24px; font-size: 11px; } }
+                VerticalBox { spacing: 4px; Text { text: "Include:"; color: Theme.text-secondary; font-size: 11px; } LineEdit { text <=> include-patterns-text; height: 24px; font-size: 11px; } }
+                HorizontalBox {
+                    spacing: 8px; alignment: start;
+                    Button { text: "Xem trước"; height: 24px; clicked => { preview-filtering() } }
+                    Button { text: "Lưu"; height: 24px; primary: true; clicked => { save-filter-config() } }
+                    Button { text: "Reset"; height: 24px; clicked => { reset-filter-config() } }
+                }
+                if (filter-stats != "") : Rectangle { 
+                    background: Theme.bg-tertiary; 
+                    border-radius: 4px; 
+                    VerticalBox { padding: 6px; Text { text: filter-stats; color: Theme.accent-green; font-size: 10px; } } 
+                }
+            }
+        }
+        if (!show-filter-config && enable-filtering) : Text { text: "Lọc file đang bật"; color: Theme.accent-green; font-size: 11px; }
+    }
+}

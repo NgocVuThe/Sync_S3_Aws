@@ -1,0 +1,88 @@
+import { Button, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Theme } from "../shared/colors.slint";
+import { PathItem } from "../shared/types.slint";
+
+export component FolderPickerSection inherits Rectangle {
+    in property <[PathItem]> local-paths;
+    in property <bool> is-selecting-folder: false;
+    in property <bool> is-selecting-base-path: false;
+    in property <string> s3-base-path: "";
+    in property <string> access-key;
+    in property <string> secret-key;
+    in property <string> session-token;
+    in property <string> region;
+    in property <string> bucket-name;
+    in property <bool> has-log-path: false;
+    in property <bool> is-opening-log: false;
+
+    callback select-folder();
+    callback select-files();
+    callback clear-folders();
+    callback remove-folder(int);
+    callback start-sync(string, string, string, string, string, [PathItem]);
+    callback open-log-folder();
+    callback select-base-path();
+
+    background: Theme.bg-secondary;
+    border-radius: 8px;
+
+    VerticalBox {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalBox {
+            alignment: start;
+            spacing: 15px;
+            Text { text: "Local Folders/Files"; color: Theme.accent-yellow; font-weight: 700; vertical-alignment: center; }
+            Button { text: "Xóa hết"; width: 80px; height: 24px; clicked => { clear-folders() } }
+        }
+        Rectangle {
+            background: Theme.bg-tertiary;
+            border-radius: 4px;
+            height: Math.min(180px, Math.max(60px, local-paths.length * 42px + 10px));
+            ScrollView {
+                VerticalBox {
+                    padding: 2px;
+                    spacing: 1px;
+                    for item[index] in local-paths : Rectangle {
+                        background: Theme.bg-card;
+                        border-radius: 2px;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 8px;
+                            height: 38px;
+                            VerticalLayout {
+                                alignment: center;
+                                Text { text: "📁 " + item.local-path; color: Theme.text-secondary; font-size: 10px; overflow: elide; }
+                                Text { text: "➜ ☁️ " + item.s3-path; color: Theme.accent-blue; font-size: 10px; font-weight: 700; overflow: elide; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 16px;
+                                    height: 16px;
+                                    background: remove-ta.has-hover ? #4b5263 : #3e4451;
+                                    border-radius: 8px;
+                                    remove-ta := TouchArea { clicked => { remove-folder(index) } mouse-cursor: pointer; }
+                                    Text { text: "X"; color: remove-ta.has-hover ? #ff7070 : Theme.accent-red; font-size: 8px; font-weight: 1000; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                    if (local-paths.length == 0) : Text { text: "Chưa chọn thư mục/file nào..."; color: Theme.text-muted; font-italic: true; horizontal-alignment: center; }
+                }
+            }
+        }
+        HorizontalBox {
+            alignment: start;
+            spacing: 8px;
+            Button { text: "Thêm Folder"; height: 28px; primary: true; enabled: !is-selecting-folder; clicked => { select-folder() } }
+            Button { text: "Thêm File"; height: 28px; enabled: !is-selecting-folder; clicked => { select-files() } }
+            Button { text: "Sync Now"; height: 28px; primary: true; enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0; clicked => { start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths); } }
+            Button { text: "Log"; height: 28px; enabled: has-log-path && !is-opening-log; clicked => { open-log-folder(); } }
+            Button { text: "BasePath"; height: 28px; enabled: !is-selecting-base-path; clicked => { select-base-path(); } }
+        }
+        if (is-selecting-folder) : Text { text: "Đang tính toán đường dẫn S3..."; color: Theme.accent-blue; font-size: 11px; horizontal-alignment: center; }
+        if (s3-base-path != "") : HorizontalLayout { padding-left: 10px; height: 18px; Text { text: "📁 BasePath: " + s3-base-path; color: Theme.accent-green; font-size: 10px; font-weight: 600; vertical-alignment: center; } }
+    }
+}
