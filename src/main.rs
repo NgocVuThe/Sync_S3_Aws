@@ -6,8 +6,8 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use rust_project::*;
 
 mod config;
-mod s3_client;
-mod ui_handlers;
+mod handlers;
+mod s3;
 mod utils;
 
 #[tokio::main]
@@ -63,7 +63,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let region_model = slint::VecModel::from(app_config.regions.iter().map(|s| s.clone().into()).collect::<Vec<slint::SharedString>>());
     ui.set_region_list(slint::ModelRc::from(std::rc::Rc::new(region_model)));
 
-    ui_handlers::setup_all_handlers(&ui);
+    handlers::setup_all_handlers(&ui);
 
     ui.run()?;
     Ok(())
