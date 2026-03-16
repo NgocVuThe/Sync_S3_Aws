@@ -72,7 +72,7 @@ pub fn setup_select_folder_handler(ui: &AppWindow) {
                         None
                     };
 
-                    let cache: crate::s3::prefix::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+                    let cache: crate::s3::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
                     for p in paths {
                         let local_path = p.to_string_lossy().to_string();
@@ -99,7 +99,14 @@ pub fn setup_select_folder_handler(ui: &AppWindow) {
 
                     let _ = ui_handle_task.upgrade_in_event_loop(move |ui| {
                         let mut current_items: Vec<PathItem> = ui.get_local_paths().iter().collect();
-                        current_items.extend(results);
+                        
+                        // Filter out duplicates based on local_path
+                        for new_item in results {
+                            if !current_items.iter().any(|item| item.local_path == new_item.local_path) {
+                                current_items.push(new_item);
+                            }
+                        }
+
                         let model = Rc::new(VecModel::from(current_items));
                         ui.set_local_paths(ModelRc::from(model));
                         ui.set_is_selecting_folder(false);
@@ -163,7 +170,7 @@ pub fn setup_select_files_handler(ui: &AppWindow) {
                         None
                     };
 
-                    let cache: crate::s3::prefix::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+                    let cache: crate::s3::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
                     for p in paths {
                         let local_path = p.to_string_lossy().to_string();
@@ -190,7 +197,14 @@ pub fn setup_select_files_handler(ui: &AppWindow) {
 
                     let _ = ui_handle_task.upgrade_in_event_loop(move |ui| {
                         let mut current_items: Vec<PathItem> = ui.get_local_paths().iter().collect();
-                        current_items.extend(results);
+                        
+                        // Filter out duplicates based on local_path
+                        for new_item in results {
+                            if !current_items.iter().any(|item| item.local_path == new_item.local_path) {
+                                current_items.push(new_item);
+                            }
+                        }
+
                         let model = Rc::new(VecModel::from(current_items));
                         ui.set_local_paths(ModelRc::from(model));
                         ui.set_is_selecting_folder(false);
@@ -260,6 +274,10 @@ pub fn setup_select_base_path_handler(ui: &AppWindow) {
             let sess_token = ui.get_session_token().to_string();
             let region = ui.get_region().to_string();
             let bucket = ui.get_bucket_name().to_string();
+            
+            // Capture current items BEFORE showing dialog to be safe, 
+            // though capturing after dialog but before spawn is also okay.
+            let current_items: Vec<PathItem> = ui.get_local_paths().iter().collect();
 
             let ui_handle_cloned = ui_handle.clone();
             let _ = ui_handle_cloned.upgrade_in_event_loop(|ui| {
@@ -313,14 +331,7 @@ pub fn setup_select_base_path_handler(ui: &AppWindow) {
                     let mut updated_items = Vec::new();
                     let cache: crate::s3::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
-
                     // 3. Recalculate each item (possibly calling S3)
-                    let current_items: Vec<PathItem> = if let Some(ui) = ui_handle_task.upgrade() {
-                        ui.get_local_paths().iter().collect()
-                    } else {
-                        Vec::new()
-                    };
-
                     for mut item in current_items {
                         let p = std::path::Path::new(item.local_path.as_str());
 
@@ -361,6 +372,53 @@ pub fn setup_select_base_path_handler(ui: &AppWindow) {
                     ui.set_is_selecting_base_path(false);
                 });
             }
+        }
+    });
+}
+
+/// Sets up the base path clearing handler.
+pub fn setup_clear_base_path_handler(ui: &AppWindow) {
+    ui.on_clear_base_path({
+        let ui_handle = ui.as_weak();
+        move || {
+            let ui = match ui_handle.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+
+            let current_items: Vec<PathItem> = ui.get_local_paths().iter().collect();
+            let ui_handle_task = ui_handle.clone();
+
+            tokio::spawn(async move {
+                // 1. Clear in config file
+                let mut config = crate::config::load_config();
+                config.s3_base_path = "".to_string();
+                if let Err(e) = crate::config::save_config(&config) {
+                    error!("Failed to save config: {:?}", e);
+                }
+
+                // 2. Recalculate paths (without base path)
+                let mut updated_items = Vec::new();
+                for mut item in current_items {
+                    let p = std::path::Path::new(item.local_path.as_str());
+                    item.s3_path = get_preview_prefix(p).into();
+                    updated_items.push(item);
+                }
+
+                // 3. Update UI
+                let ui_handle_final = ui_handle_task.clone();
+                let _ = ui_handle_task.upgrade_in_event_loop(move |ui| {
+                    ui.set_s3_base_path("".into());
+                    let model = Rc::new(VecModel::from(updated_items));
+                    ui.set_local_paths(ModelRc::from(model));
+                    crate::utils::update_status(
+                        &ui_handle_final,
+                        "Đã xóa BasePath. Sẵn sàng tải toàn bộ bucket.".to_string(),
+                        0.0,
+                        false,
+                    );
+                });
+            });
         }
     });
 }

@@ -42,6 +42,7 @@ export component AppWindow inherits Window {
     in-out property <bool> is-selecting-folder: false;
     in-out property <bool> is-opening-log: false;
     in-out property <bool> is-selecting-base-path: false;
+    in-out property <string> download-target-path: "";
     in-out property <bool> show-filter-config: false;
     in-out property <bool> enable-filtering: true;
     in-out property <string> exclude-patterns-text: "";
@@ -77,11 +78,14 @@ export component AppWindow inherits Window {
     callback clear-folders();
     callback remove-folder(int);
     callback start-sync(string, string, string, string, string, [PathItem]);
+    callback select-download-folder();
+    callback execute-download();
     callback test-access(string, string, string, string, string);
     callback open-settings();
     callback select-log-path();
     callback open-log-folder();
     callback select-base-path();
+    callback clear-base-path();
     callback toggle-filter-config();
     callback save-filter-config();
     callback reset-filter-config();
@@ -179,14 +183,18 @@ export component AppWindow inherits Window {
             bucket-name: root.bucket-name;
             has-log-path: root.log-path != "";
             is-opening-log: root.is-opening-log;
+            download-target-path <=> root.download-target-path;
             
             select-folder => { root.select-folder(); }
             select-files => { root.select-files(); }
             clear-folders => { root.clear-folders(); }
             remove-folder(idx) => { root.remove-folder(idx); }
             start-sync(a, s, t, r, b, paths) => { root.start-sync(a, s, t, r, b, paths); }
+            select-download-folder => { root.select-download-folder(); }
+            execute-download => { root.execute-download(); }
             open-log-folder => { root.open-log-folder(); }
             select-base-path => { root.select-base-path(); }
+            clear-base-path => { root.clear-base-path(); }
         }
 
         FilterConfigSection {

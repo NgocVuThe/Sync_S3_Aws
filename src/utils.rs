@@ -190,19 +190,6 @@ impl FilteringStats {
             self.excluded_files as f64 / self.total_files as f64
         }
     }
-
-    pub fn size_savings(&self) -> f64 {
-        if self.total_size == 0 {
-            0.0
-        } else {
-            self.excluded_size as f64 / self.total_size as f64
-        }
-    }
-}
-
-/// Validates if a string is a valid glob pattern.
-pub fn is_valid_glob_pattern(pattern: &str) -> bool {
-    glob::Pattern::new(pattern).is_ok()
 }
 
 /// Validates a list of comma-separated glob patterns.
@@ -377,7 +364,6 @@ mod tests {
         };
 
         assert_eq!(stats.exclusion_rate(), 0.2);
-        assert_eq!(stats.size_savings(), 0.2);
     }
 
     #[test]
