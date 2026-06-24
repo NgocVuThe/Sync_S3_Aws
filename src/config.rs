@@ -71,6 +71,32 @@ fn default_buckets() -> Vec<String> {
         "i-ocean-global-stg-contents".to_string(),
         "i-ocean-global-prod-contents".to_string(),
         "ien-corp-prod-contents".to_string(),
+        "ien-corp-tmp-contents".to_string(),
+    ]
+}
+
+fn default_bucket_configs() -> Vec<BucketConfig> {
+    vec![
+        BucketConfig {
+            name: "ien-corp-dev-contents".to_string(),
+            distribution_id: String::new(),
+        },
+        BucketConfig {
+            name: "i-ocean-global-stg-contents".to_string(),
+            distribution_id: String::new(),
+        },
+        BucketConfig {
+            name: "i-ocean-global-prod-contents".to_string(),
+            distribution_id: String::new(),
+        },
+        BucketConfig {
+            name: "ien-corp-prod-contents".to_string(),
+            distribution_id: String::new(),
+        },
+        BucketConfig {
+            name: "ien-corp-tmp-contents".to_string(),
+            distribution_id: "E22W9TAVWQHL60".to_string(),
+        },
     ]
 }
 
@@ -95,7 +121,7 @@ pub struct AppConfig {
     pub filter_config: FilterConfig,
     #[serde(default = "default_buckets")]
     pub buckets: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "default_bucket_configs")]
     pub bucket_configs: Vec<BucketConfig>,
     #[serde(default = "default_regions")]
     pub regions: Vec<String>,
@@ -145,6 +171,25 @@ pub fn load_config() -> AppConfig {
             })
             .collect();
     }
+
+    // Ensure new default buckets are present for existing users
+    let defaults = default_bucket_configs();
+    for default_bc in defaults {
+        let exists = cfg
+            .bucket_configs
+            .iter()
+            .any(|bc| bc.name == default_bc.name);
+        if !exists {
+            cfg.bucket_configs.push(default_bc);
+        }
+    }
+
+    // Sync old buckets list from bucket_configs
+    cfg.buckets = cfg
+        .bucket_configs
+        .iter()
+        .map(|bc| bc.name.clone())
+        .collect();
 
     cfg
 }
