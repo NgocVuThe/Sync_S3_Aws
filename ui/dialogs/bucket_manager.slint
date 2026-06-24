@@ -1,15 +1,17 @@
 import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView } from "std-widgets.slint";
 import { Theme } from "../shared/colors.slint";
+import { BucketConfigItem } from "../shared/types.slint";
 
 export component BucketManagerDialog inherits Rectangle {
-    in-out property <[string]> bucket-list;
-    in-out property <string> new-name;
+    in-out property <[BucketConfigItem]> bucket-list;
+    in-out property <string> new-bucket-name;
+    in-out property <string> new-distribution-id;
     in-out property <int> editing-index: -1;
     in-out property <string> error-message;
     in-out property <bool> show-add-input: false;
     
-    callback add-bucket(string);
-    callback update-bucket(int, string);
+    callback add-bucket(string, string);
+    callback update-bucket(int, string, string);
     callback delete-clicked(int, string);
     callback close();
 
@@ -17,15 +19,15 @@ export component BucketManagerDialog inherits Rectangle {
     TouchArea { } // Block clicks behind
 
     Rectangle {
-        x: (parent.width - 480px) / 2;
-        height: Math.min(550px, 120px + Math.min(300px, bucket-list.length * 60px) + (show-add-input ? 100px : 60px) + (error-message != "" ? 30px : 0px));
+        x: (parent.width - 520px) / 2;
+        height: Math.min(600px, 120px + Math.min(350px, bucket-list.length * 80px) + (show-add-input ? 140px : 60px) + (error-message != "" ? 30px : 0px));
         y: (parent.height - self.height) / 2;
-        width: 480px;
+        width: 520px;
         background: Theme.bg-tertiary;
         border-radius: 12px;
         border-width: 2px;
         border-color: Theme.border-default;
-        animate height { duration: 200ms; easing: ease-in-out; }
+        animate height { duration: 200ms; easing: ease-out; }
         
         VerticalBox {
             padding: 24px;
@@ -34,7 +36,7 @@ export component BucketManagerDialog inherits Rectangle {
             HorizontalLayout {
                 alignment: center;
                 height: 32px;
-                Text { text: "Manage S3 Buckets"; font-size: 20px; font-weight: 800; color: Theme.accent-blue; vertical-alignment: center; }
+                Text { text: "Manage S3 Buckets & CloudFront"; font-size: 18px; font-weight: 800; color: Theme.accent-blue; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
                 
                 VerticalLayout {
@@ -57,7 +59,7 @@ export component BucketManagerDialog inherits Rectangle {
                 border-radius: 8px;
                 border-width: 1px;
                 border-color: Theme.border-default;
-                height: Math.min(300px, bucket-list.length * 60px + 20px);
+                height: Math.min(350px, bucket-list.length * 80px + 20px);
                 animate height { duration: 200ms; }
                 
                 ScrollView {
@@ -66,52 +68,58 @@ export component BucketManagerDialog inherits Rectangle {
                         spacing: 10px;
                         alignment: start;
                         for bucket[index] in bucket-list : Rectangle {
-                            height: 50px;
+                            height: 90px;
                             background: Theme.bg-card;
                             border-radius: 6px;
                             HorizontalLayout {
                                 padding: 8px;
-                                spacing: 12px;
+                                spacing: 8px;
                                 
                                 if (editing-index == index) : VerticalLayout {
+                                    spacing: 4px;
                                     alignment: center;
                                     LineEdit {
-                                        text <=> new-name;
-                                        font-size: 14px;
-                                        height: 32px;
-                                        accepted => { update-bucket(index, new-name); }
+                                        text <=> new-bucket-name; placeholder-text: "Bucket name"; font-size: 14px; height: 28px;
                                     }
-                                }
-                                if (editing-index == index) : VerticalLayout {
-                                    alignment: center;
+                                    LineEdit {
+                                        text <=> new-distribution-id; placeholder-text: "Distribution ID"; font-size: 12px; height: 28px;
+                                    }
                                     HorizontalLayout {
-                                        spacing: 8px;
+                                        spacing: 6px;
+                                        alignment: center;
                                         Button {
-                                            text: "Save"; primary: true; width: 65px; height: 32px;
-                                            clicked => { update-bucket(index, new-name); }
+                                            text: "Save"; primary: true; width: 60px; height: 24px;
+                                            clicked => { update-bucket(index, new-bucket-name, new-distribution-id); }
                                         }
                                         Button {
-                                            text: "Esc"; width: 55px; height: 32px;
-                                            clicked => { editing-index = -1; new-name = ""; }
+                                            text: "Esc"; width: 50px; height: 24px;
+                                            clicked => { editing-index = -1; new-bucket-name = ""; new-distribution-id = ""; }
                                         }
                                     }
                                 }
-
-                                if (editing-index != index) : Text {
-                                    text: bucket; color: Theme.text-primary; font-size: 14px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+                                
+                                if (editing-index != index) : VerticalLayout {
+                                    spacing: 2px;
+                                    alignment: center;
+                                    Text { text: bucket.name; color: Theme.text-primary; font-size: 14px; font-weight: 600; overflow: elide; }
+                                    Text { 
+                                        text: bucket.distribution-id == "" ? "No Distribution ID" : "CF: " + bucket.distribution-id; 
+                                        color: bucket.distribution-id == "" ? Theme.text-secondary : Theme.accent-green; 
+                                        font-size: 12px; 
+                                        overflow: elide; 
+                                    }
                                 }
+                                
                                 if (editing-index != index) : VerticalLayout {
                                     alignment: center;
-                                    HorizontalLayout {
-                                        spacing: 8px;
-                                        Button {
-                                            text: "Edit"; width: 55px; height: 32px;
-                                            clicked => { new-name = bucket; editing-index = index; }
-                                        }
-                                        Button {
-                                            text: "Del"; width: 55px; height: 32px;
-                                            clicked => { delete-clicked(index, bucket); }
-                                        }
+                                    spacing: 6px;
+                                    Button {
+                                        text: "Edit"; width: 50px; height: 24px;
+                                        clicked => { new-bucket-name = bucket.name; new-distribution-id = bucket.distribution-id; editing-index = index; }
+                                    }
+                                    Button {
+                                        text: "Del"; width: 50px; height: 24px;
+                                        clicked => { delete-clicked(index, bucket.name); }
                                     }
                                 }
                             }
@@ -129,30 +137,36 @@ export component BucketManagerDialog inherits Rectangle {
                     Rectangle {
                         width: 48px; height: 48px; background: add-btn-ta.has-hover ? Theme.accent-blue : Theme.border-default; border-radius: 24px;
                         animate background { duration: 200ms; }
-                        add-btn-ta := TouchArea { clicked => { show-add-input = true; new-name = ""; error-message = ""; } mouse-cursor: pointer; }
+                        add-btn-ta := TouchArea { clicked => { show-add-input = true; new-bucket-name = ""; new-distribution-id = ""; error-message = ""; } mouse-cursor: pointer; }
                         Text { text: "+"; font-size: 32px; color: add-btn-ta.has-hover ? Theme.bg-secondary : white; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
                 
-                if (show-add-input) : HorizontalLayout {
-                    spacing: 12px;
+                if (show-add-input) : VerticalLayout {
+                    spacing: 10px;
                     alignment: center;
                     LineEdit {
-                        text <=> new-name; placeholder-text: "Bucket name..."; horizontal-stretch: 1; height: 40px;
-                        accepted => { add-bucket(new-name); }
+                        text <=> new-bucket-name; placeholder-text: "Bucket name..."; horizontal-stretch: 1; height: 36px;
                     }
-                    Button { text: "Add"; primary: true; width: 80px; height: 40px; clicked => { add-bucket(new-name); } }
-                    VerticalLayout {
+                    LineEdit {
+                        text <=> new-distribution-id; placeholder-text: "CloudFront Distribution ID (optional)"; horizontal-stretch: 1; height: 36px;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
                         alignment: center;
-                        Rectangle {
-                            width: 28px; height: 28px;
-                            border-radius: 14px;
-                            border-width: 1px;
-                            border-color: cancel-add-ta.has-hover ? Theme.accent-red : Theme.border-default;
-                            background: cancel-add-ta.has-hover ? #e06c7522 : transparent;
-                            animate background, border-color { duration: 150ms; }
-                            cancel-add-ta := TouchArea { clicked => { show-add-input = false; new-name = ""; } mouse-cursor: pointer; }
-                            Text { text: "X"; font-size: 14px; font-weight: 700; color: cancel-add-ta.has-hover ? Theme.accent-red : white; horizontal-alignment: center; vertical-alignment: center; }
+                        Button { text: "Add"; primary: true; width: 80px; height: 36px; clicked => { add-bucket(new-bucket-name, new-distribution-id); } }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 28px; height: 28px;
+                                border-radius: 14px;
+                                border-width: 1px;
+                                border-color: cancel-add-ta.has-hover ? Theme.accent-red : Theme.border-default;
+                                background: cancel-add-ta.has-hover ? #e06c7522 : transparent;
+                                animate background, border-color { duration: 150ms; }
+                                cancel-add-ta := TouchArea { clicked => { show-add-input = false; new-bucket-name = ""; new-distribution-id = ""; } mouse-cursor: pointer; }
+                                Text { text: "X"; font-size: 14px; font-weight: 700; color: cancel-add-ta.has-hover ? Theme.accent-red : white; horizontal-alignment: center; vertical-alignment: center; }
+                            }
                         }
                     }
                 }

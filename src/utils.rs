@@ -219,6 +219,53 @@ pub fn update_status(
     });
 }
 
+/// Appends a message to a log file.
+/// log_path can be a directory (appends to s3sync.log) or a file path.
+pub fn log_to_file(log_path: &str, message: &str) {
+    if log_path.is_empty() {
+        return;
+    }
+    let path = std::path::Path::new(log_path);
+    let file_path = if path.is_dir() {
+        path.join("s3sync.log")
+    } else {
+        path.to_path_buf()
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", message);
+    }
+}
+
+/// Appends a message to a CloudFront-specific log file with date in name.
+pub fn log_cloudfront_to_file(log_dir: &str, message: &str) {
+    if log_dir.is_empty() {
+        return;
+    }
+    let path = std::path::Path::new(log_dir);
+    if !path.is_dir() {
+        // If it's a file path, just use log_to_file
+        return log_to_file(log_dir, message);
+    }
+
+    let now = chrono::Local::now();
+    let filename = format!("cloudfront_log_{}.log", now.format("%d_%m_%Y"));
+    let file_path = path.join(filename);
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

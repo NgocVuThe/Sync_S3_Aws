@@ -4,6 +4,8 @@ use slint::{ModelRc, VecModel};
 use std::rc::Rc;
 use tracing::error;
 
+use crate::config::BucketConfig;
+
 static BUCKET_NAME_REGEX: Lazy<regex::Regex> =
     Lazy::new(|| regex::Regex::new(r"^[a-z0-9][a-z0-9.-]*[a-z0-9]$").unwrap());
 
@@ -13,70 +15,76 @@ static REGION_NAME_REGEX: Lazy<regex::Regex> =
 pub fn setup_bucket_handlers(ui: &AppWindow) {
     let ui_handle = ui.as_weak();
 
-    // Load initial bucket list
-    let config = crate::config::load_config();
-    let initial_buckets: Vec<slint::SharedString> = config
-        .buckets
-        .iter()
-        .map(|s| slint::SharedString::from(s.clone()))
-        .collect();
-    ui.set_bucket_list(ModelRc::from(Rc::new(VecModel::from(initial_buckets))));
+    let load_bucket_configs = || -> Vec<BucketConfig> {
+        let config = crate::config::load_config();
+        config.bucket_configs.clone()
+    };
 
-    // Helper to refresh bucket list in UI and save to config
+    let initial_configs = load_bucket_configs();
+    let bucket_items: Vec<BucketConfigItem> = initial_configs
+        .iter()
+        .map(|b| BucketConfigItem {
+            name: b.name.clone().into(),
+            distribution_id: b.distribution_id.clone().into(),
+        })
+        .collect();
+    let bucket_names: Vec<slint::SharedString> = initial_configs
+        .iter()
+        .map(|b| b.name.clone().into())
+        .collect();
+    ui.set_bucket_list(ModelRc::from(Rc::new(VecModel::from(bucket_items))));
+    ui.set_bucket_name_list(ModelRc::from(Rc::new(VecModel::from(bucket_names))));
+
     let refresh_buckets = {
         let ui_handle = ui_handle.clone();
-        move |buckets: Vec<String>| {
-            let shared_buckets: Vec<slint::SharedString> = buckets
+        move |configs: Vec<BucketConfig>| {
+            let bucket_items: Vec<BucketConfigItem> = configs
                 .iter()
-                .map(|s| slint::SharedString::from(s.clone()))
+                .map(|b| BucketConfigItem {
+                    name: b.name.clone().into(),
+                    distribution_id: b.distribution_id.clone().into(),
+                })
                 .collect();
 
-            // Save to config
+            let bucket_names: Vec<slint::SharedString> =
+                configs.iter().map(|b| b.name.clone().into()).collect();
+
             let mut config = crate::config::load_config();
-            config.buckets = buckets;
+            config.bucket_configs = configs;
             if let Err(e) = crate::config::save_config(&config) {
                 error!("Failed to save bucket config: {:?}", e);
             }
 
             let _ = ui_handle.upgrade_in_event_loop(move |ui| {
-                ui.set_bucket_list(ModelRc::from(Rc::new(VecModel::from(shared_buckets))));
+                ui.set_bucket_list(ModelRc::from(Rc::new(VecModel::from(bucket_items))));
+                ui.set_bucket_name_list(ModelRc::from(Rc::new(VecModel::from(bucket_names))));
             });
         }
     };
 
-    // Validation helper
     let validate_bucket_name = |name: &str,
-                                current_buckets: &[String],
+                                current_buckets: &[BucketConfig],
                                 skip_index: Option<usize>|
      -> Result<(), String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err("Bucket name cannot be empty".to_string());
         }
-
-        // AWS Bucket naming rules
-        // https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
         if trimmed.len() < 3 || trimmed.len() > 63 {
             return Err("Bucket name must be between 3 and 63 characters long".to_string());
         }
-
         if !BUCKET_NAME_REGEX.is_match(trimmed) {
-            return Err("Invalid characters (only a-z, 0-9, . and - allowed, must start/end with letter/digit)".to_string());
+            return Err("Invalid characters (only a-z, 0-9, . and - allowed)".to_string());
         }
-
         if trimmed.contains("..") {
             return Err("Bucket name cannot contain consecutive periods".to_string());
         }
-
         if trimmed.starts_with("xn--") || trimmed.starts_with("sthree-") {
             return Err("Bucket name cannot start with 'xn--' or 'sthree-'".to_string());
         }
-
         if trimmed.ends_with("-s3alias") || trimmed.ends_with("--ol-s3") {
             return Err("Bucket name cannot end with '-s3alias' or '--ol-s3'".to_string());
         }
-
-        // Check for IP address format
         if trimmed.chars().all(|c| c.is_ascii_digit() || c == '.')
             && trimmed.split('.').count() == 4
         {
@@ -84,7 +92,7 @@ pub fn setup_bucket_handlers(ui: &AppWindow) {
         }
 
         for (i, b) in current_buckets.iter().enumerate() {
-            if Some(i) != skip_index && b == trimmed {
+            if Some(i) != skip_index && b.name == trimmed {
                 return Err("Bucket name already exists".to_string());
             }
         }
@@ -92,21 +100,26 @@ pub fn setup_bucket_handlers(ui: &AppWindow) {
         Ok(())
     };
 
-    // Add bucket
     ui.on_add_bucket({
         let ui_handle = ui_handle.clone();
         let refresh_buckets = refresh_buckets.clone();
-        move |name| {
+        move |name: slint::SharedString, dist_id: slint::SharedString| {
             let Some(ui) = ui_handle.upgrade() else {
                 return;
             };
+            let name_str = name.to_string();
+            let dist_id_str = dist_id.to_string();
             let mut config = crate::config::load_config();
 
-            match validate_bucket_name(&name, &config.buckets, None) {
+            match validate_bucket_name(&name_str, &config.bucket_configs, None) {
                 Ok(_) => {
-                    config.buckets.push(name.trim().to_string());
-                    refresh_buckets(config.buckets);
+                    config.bucket_configs.push(BucketConfig {
+                        name: name_str.trim().to_string(),
+                        distribution_id: dist_id_str.trim().to_string(),
+                    });
+                    refresh_buckets(config.bucket_configs);
                     ui.set_new_bucket_name("".into());
+                    ui.set_new_distribution_id("".into());
                     ui.set_bucket_manager_error("".into());
                     ui.set_show_add_input(false);
                 }
@@ -117,39 +130,40 @@ pub fn setup_bucket_handlers(ui: &AppWindow) {
         }
     });
 
-    // Update bucket
     ui.on_update_bucket({
         let ui_handle = ui_handle.clone();
         let refresh_buckets = refresh_buckets.clone();
-        move |index, name| {
+        move |index: i32, name: slint::SharedString, dist_id: slint::SharedString| {
             let Some(ui) = ui_handle.upgrade() else {
                 return;
             };
             let mut config = crate::config::load_config();
             let idx = index as usize;
 
-            if idx >= config.buckets.len() {
+            if idx >= config.bucket_configs.len() {
                 return;
             }
 
-            match validate_bucket_name(&name, &config.buckets, Some(idx)) {
-                Ok(_) => {
-                    let old_name = config.buckets[idx].clone();
-                    let new_name = name.trim().to_string();
-                    config.buckets[idx] = new_name.clone();
+            let name_str = name.to_string();
+            let dist_id_str = dist_id.to_string();
 
-                    // If the updated bucket was selected, update selected_bucket
+            match validate_bucket_name(&name_str, &config.bucket_configs, Some(idx)) {
+                Ok(_) => {
+                    let old_name = config.bucket_configs[idx].name.clone();
+                    let new_name = name_str.trim().to_string();
+                    config.bucket_configs[idx].name = new_name.clone();
+                    config.bucket_configs[idx].distribution_id = dist_id_str.trim().to_string();
+
                     if config.selected_bucket == old_name {
                         config.selected_bucket = new_name.clone();
-                        ui.set_bucket_name(new_name.into());
-                        // Save config immediately to persist selected bucket change
                         if let Err(e) = crate::config::save_config(&config) {
                             error!("Failed to save config after bucket rename: {:?}", e);
                         }
                     }
 
-                    refresh_buckets(config.buckets);
+                    refresh_buckets(config.bucket_configs);
                     ui.set_new_bucket_name("".into());
+                    ui.set_new_distribution_id("".into());
                     ui.set_editing_bucket_index(-1);
                     ui.set_bucket_manager_error("".into());
                 }
@@ -160,31 +174,28 @@ pub fn setup_bucket_handlers(ui: &AppWindow) {
         }
     });
 
-    // Delete bucket
     ui.on_delete_bucket({
         let ui_handle = ui_handle.clone();
         let refresh_buckets = refresh_buckets.clone();
-        move |index| {
+        move |index: i32| {
             let Some(ui) = ui_handle.upgrade() else {
                 return;
             };
             let mut config = crate::config::load_config();
             let idx = index as usize;
 
-            if idx < config.buckets.len() {
-                let deleted_name = config.buckets.remove(idx);
+            if idx < config.bucket_configs.len() {
+                let deleted_name = config.bucket_configs.remove(idx).name;
 
-                // If the deleted bucket was selected, clear it
                 if config.selected_bucket == deleted_name {
                     config.selected_bucket = String::new();
                     ui.set_bucket_name("".into());
-                    // Save config immediately to persist selected bucket removal
                     if let Err(e) = crate::config::save_config(&config) {
                         error!("Failed to save config after bucket deletion: {:?}", e);
                     }
                 }
 
-                refresh_buckets(config.buckets);
+                refresh_buckets(config.bucket_configs);
                 ui.set_bucket_manager_error("".into());
             }
         }
@@ -194,7 +205,6 @@ pub fn setup_bucket_handlers(ui: &AppWindow) {
 pub fn setup_region_handlers(ui: &AppWindow) {
     let ui_handle = ui.as_weak();
 
-    // Load initial region list
     let config = crate::config::load_config();
     let initial_regions: Vec<slint::SharedString> = config
         .regions
@@ -203,7 +213,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
         .collect();
     ui.set_region_list(ModelRc::from(Rc::new(VecModel::from(initial_regions))));
 
-    // Helper to refresh region list in UI and save to config
     let refresh_regions = {
         let ui_handle = ui_handle.clone();
         move |regions: Vec<String>| {
@@ -224,7 +233,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
         }
     };
 
-    // Validation helper
     let validate_region_name =
         |name: &str, current_regions: &[String], skip_index: Option<usize>| -> Result<(), String> {
             let trimmed = name.trim();
@@ -245,7 +253,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
             Ok(())
         };
 
-    // Add region
     ui.on_add_region({
         let ui_handle = ui_handle.clone();
         let refresh_regions = refresh_regions.clone();
@@ -270,7 +277,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
         }
     });
 
-    // Update region
     ui.on_update_region({
         let ui_handle = ui_handle.clone();
         let refresh_regions = refresh_regions.clone();
@@ -291,7 +297,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
                     let new_name = name.trim().to_string();
                     config.regions[idx] = new_name.clone();
 
-                    // If the updated region was selected, update selected_region
                     if config.selected_region == old_name {
                         config.selected_region = new_name.clone();
                         ui.set_region(new_name.into());
@@ -312,7 +317,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
         }
     });
 
-    // Delete region
     ui.on_delete_region({
         let ui_handle = ui_handle.clone();
         let refresh_regions = refresh_regions.clone();
@@ -326,7 +330,6 @@ pub fn setup_region_handlers(ui: &AppWindow) {
             if idx < config.regions.len() {
                 let deleted_name = config.regions.remove(idx);
 
-                // If the deleted region was selected, clear it
                 if config.selected_region == deleted_name {
                     config.selected_region = String::new();
                     ui.set_region("".into());

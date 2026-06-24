@@ -4,6 +4,13 @@ use tracing::warn;
 const APP_NAME: &str = "S3SyncTool";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BucketConfig {
+    pub name: String,
+    #[serde(default)]
+    pub distribution_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FilterConfig {
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
@@ -88,12 +95,16 @@ pub struct AppConfig {
     pub filter_config: FilterConfig,
     #[serde(default = "default_buckets")]
     pub buckets: Vec<String>,
+    #[serde(default)]
+    pub bucket_configs: Vec<BucketConfig>,
     #[serde(default = "default_regions")]
     pub regions: Vec<String>,
     #[serde(default)]
     pub selected_bucket: String,
     #[serde(default = "default_region")]
     pub selected_region: String,
+    #[serde(default)]
+    pub auto_invalidate: bool,
 }
 
 fn default_region() -> String {
@@ -112,7 +123,7 @@ fn default_regions() -> Vec<String> {
 
 /// Load config from file. Returns default if file doesn't exist or is invalid.
 pub fn load_config() -> AppConfig {
-    match confy::load(APP_NAME, None) {
+    let mut cfg: AppConfig = match confy::load(APP_NAME, None) {
         Ok(cfg) => cfg,
         Err(e) => {
             warn!(
@@ -121,7 +132,21 @@ pub fn load_config() -> AppConfig {
             );
             AppConfig::default()
         }
+    };
+
+    // Migrate old buckets list to bucket_configs
+    if cfg.bucket_configs.is_empty() && !cfg.buckets.is_empty() {
+        cfg.bucket_configs = cfg
+            .buckets
+            .iter()
+            .map(|name| BucketConfig {
+                name: name.clone(),
+                distribution_id: String::new(),
+            })
+            .collect();
     }
+
+    cfg
 }
 
 /// Save config to file.
@@ -132,4 +157,30 @@ pub fn save_config(config: &AppConfig) -> Result<(), confy::ConfyError> {
 /// Get the config file path for debugging purposes.
 pub fn get_config_path() -> Option<std::path::PathBuf> {
     confy::get_configuration_file_path(APP_NAME, None).ok()
+}
+
+impl AppConfig {
+    pub fn get_bucket_config(&self, bucket_name: &str) -> Option<&BucketConfig> {
+        self.bucket_configs.iter().find(|b| b.name == bucket_name)
+    }
+
+    pub fn get_distribution_id(&self, bucket_name: &str) -> Option<String> {
+        let dist_id = self
+            .get_bucket_config(bucket_name)
+            .map(|b| b.distribution_id.clone())
+            .unwrap_or_default();
+        if dist_id.is_empty() {
+            None
+        } else {
+            Some(dist_id)
+        }
+    }
+
+    pub fn bucket_names(&self) -> Vec<String> {
+        if !self.bucket_configs.is_empty() {
+            self.bucket_configs.iter().map(|b| b.name.clone()).collect()
+        } else {
+            self.buckets.clone()
+        }
+    }
 }

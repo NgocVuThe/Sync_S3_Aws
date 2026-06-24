@@ -1,7 +1,7 @@
 use crate::*;
 use slint::Model;
-use tracing::error;
-use crate::s3::{create_s3_client, sync_to_s3};
+use tracing::{error, info};
+use crate::s3::{create_s3_client, sync_to_s3, create_cloudfront_client, invalidate_cache};
 
 /// Sets up the start sync handler.
 pub fn setup_start_sync_handler(ui: &AppWindow) {
@@ -15,6 +15,12 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                 .map(|item: PathItem| (item.local_path.to_string(), item.s3_path.to_string()))
                 .collect();
             let log_path = ui_handle.upgrade().map(|ui| ui.get_log_path().to_string()).unwrap_or_default();
+            let auto_invalidate = ui_handle.upgrade().map(|ui| ui.get_auto_invalidate()).unwrap_or(false);
+            let dist_id = ui_handle.upgrade().map(|ui| ui.get_distribution_id().to_string()).unwrap_or_default();
+            let acc_key_clone = acc_key.to_string();
+            let sec_key_clone = sec_key.to_string();
+            let sess_token_opt = if sess_token.is_empty() { None } else { Some(sess_token.to_string()) };
+            let region_str_for_cf = region_str.clone();
 
             // Save selected bucket and region to config
             let mut config = crate::config::load_config();
@@ -58,10 +64,92 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                 {
                     Ok(client) => {
                         let client = std::sync::Arc::new(client);
+                        let bucket_name_for_cf = bucket_name.clone();
                         if let Err(e) =
-                            sync_to_s3(client, bucket_name, mappings, ui_handle_cloned, log_path).await
+                            sync_to_s3(client, bucket_name, mappings, ui_handle_cloned.clone(), log_path.clone()).await
                         {
                             error!("Sync failed: {}", e);
+                            return;
+                        }
+
+                        // Auto-invalidate CloudFront cache if enabled
+                        if auto_invalidate && !dist_id.is_empty() {
+                            crate::utils::update_status(
+                                &ui_handle_cloned,
+                                "Đang xóa cache CloudFront...".to_string(),
+                                1.0,
+                                false,
+                            );
+
+                            match create_cloudfront_client(
+                                acc_key_clone,
+                                sec_key_clone,
+                                sess_token_opt,
+                                region_str_for_cf,
+                            ).await {
+                                Ok(cf_client) => {
+                                    match invalidate_cache(&cf_client, &dist_id, vec!["/*".to_string()]).await {
+                                        Ok(inv_id) => {
+                                            let now = chrono::Local::now();
+                                            let log_msg = format!(
+                                                "[{}] Auto CloudFront Invalidation - Bucket: {}, Distribution ID: {}, Invalidation ID: {}",
+                                                now.format("%Y-%m-%d %H:%M:%S"),
+                                                bucket_name_for_cf,
+                                                dist_id,
+                                                inv_id
+                                            );
+                                            info!("{}", log_msg);
+                                            crate::utils::log_cloudfront_to_file(&log_path, &log_msg);
+                                            
+                                            crate::utils::update_status(
+                                                &ui_handle_cloned,
+                                                format!("Đã sync và tạo invalidation: {} - Bucket: {}", inv_id, bucket_name_for_cf).to_string(),
+                                                1.0,
+                                                false,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            error!("CloudFront invalidation failed: {}", e);
+                                            let now = chrono::Local::now();
+                                            let log_msg = format!(
+                                                "[{}] Auto CloudFront Invalidation FAILED - Bucket: {}, Distribution ID: {}, Error: {}",
+                                                now.format("%Y-%m-%d %H:%M:%S"),
+                                                bucket_name_for_cf,
+                                                dist_id,
+                                                e
+                                            );
+                                            error!("{}", log_msg);
+                                            crate::utils::log_cloudfront_to_file(&log_path, &log_msg);
+                                            
+                                            crate::utils::update_status(
+                                                &ui_handle_cloned,
+                                                format!("Sync xong nhưng lỗi invalidation: {}", e).to_string(),
+                                                1.0,
+                                                true,
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let err_msg = e.to_string();
+                                    error!("Failed to create CloudFront client: {}", err_msg);
+                                    let now = chrono::Local::now();
+                                        let log_msg = format!(
+                                            "[{}] CloudFront Client Creation FAILED - Bucket: {}, Error: {}",
+                                            now.format("%Y-%m-%d %H:%M:%S"),
+                                            bucket_name_for_cf,
+                                            err_msg
+                                        );
+                                        error!("{}", log_msg);
+                                        crate::utils::log_cloudfront_to_file(&log_path, &log_msg);
+                                        crate::utils::update_status(
+                                        &ui_handle_cloned,
+                                        format!("Sync xong nhưng lỗi CloudFront: {}", err_msg),
+                                        1.0,
+                                        true,
+                                    );
+                                }
+                            }
                         }
                     }
                     Err(e) => {
