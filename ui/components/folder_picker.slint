@@ -14,14 +14,26 @@ export component FolderPickerSection inherits Rectangle {
     in property <string> bucket-name;
     in property <bool> has-log-path: false;
     in property <bool> is-opening-log: false;
+    in-out property <bool> is-downloading: false;
+    in-out property <bool> is-syncing: false;
+    in property <string> total-size-text: "";
+    in property <string> eta-text: "";
+    in-out property <string> download-target-path: "";
+    in property <string> selected-aws-profile: "";
+    in property <string> manual-sentinel;
+
+    private property <bool> has-cred: (selected-aws-profile != "" && selected-aws-profile != manual-sentinel) || (access-key != "" && secret-key != "");
 
     callback select-folder();
     callback select-files();
     callback clear-folders();
     callback remove-folder(int);
     callback start-sync(string, string, string, string, string, [PathItem]);
+    callback select-download-folder();
+    callback execute-download();
     callback open-log-folder();
     callback select-base-path();
+    callback clear-base-path();
 
     background: Theme.bg-secondary;
     border-radius: 8px;
@@ -78,11 +90,44 @@ export component FolderPickerSection inherits Rectangle {
             spacing: 8px;
             Button { text: "Thêm Folder"; height: 28px; primary: true; enabled: !is-selecting-folder; clicked => { select-folder() } }
             Button { text: "Thêm File"; height: 28px; enabled: !is-selecting-folder; clicked => { select-files() } }
-            Button { text: "Sync Now"; height: 28px; primary: true; enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0; clicked => { start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths); } }
+            Button { text: is-syncing ? "Đang sync..." : "Sync Now"; height: 28px; primary: true; enabled: has-cred && bucket-name != "" && region != "" && local-paths.length > 0 && !is-syncing && !is-downloading; clicked => { is-syncing = true; start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths); } }
+Button { 
+                text: is-downloading ? "Đang tải..." : (download-target-path == "" ? "Download" : "Start Download"); 
+                height: 28px; 
+                primary: download-target-path != "";
+                enabled: has-cred && bucket-name != "" && region != "" && !is-downloading && !is-syncing; 
+                clicked => { 
+                    if (download-target-path == "") {
+                        select-download-folder();
+                    } else {
+                        is-downloading = true;
+                        execute-download();
+                    }
+                } 
+            }
             Button { text: "Log"; height: 28px; enabled: has-log-path && !is-opening-log; clicked => { open-log-folder(); } }
             Button { text: "BasePath"; height: 28px; enabled: !is-selecting-base-path; clicked => { select-base-path(); } }
         }
         if (is-selecting-folder) : Text { text: "Đang tính toán đường dẫn S3..."; color: Theme.accent-blue; font-size: 11px; horizontal-alignment: center; }
-        if (s3-base-path != "") : HorizontalLayout { padding-left: 10px; height: 18px; Text { text: "📁 BasePath: " + s3-base-path; color: Theme.accent-green; font-size: 10px; font-weight: 600; vertical-alignment: center; } }
+if (s3-base-path != "") : HorizontalLayout { 
+            padding-left: 10px; 
+            height: 18px; 
+            spacing: 5px;
+            Text { text: "📁 BasePath: " + s3-base-path; color: Theme.accent-green; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+            Rectangle {
+                width: 14px; height: 14px;
+                background: clear-base-ta.has-hover ? #4b5263 : #3e4451;
+                border-radius: 7px;
+                clear-base-ta := TouchArea { clicked => { clear-base-path() } mouse-cursor: pointer; }
+                Text { text: "X"; color: Theme.accent-red; font-size: 8px; font-weight: 1000; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+        if (total-size-text != "" || eta-text != "") : HorizontalLayout {
+            padding-left: 10px; 
+            height: 18px;
+            spacing: 15px;
+            if (total-size-text != "") : Text { text: "Tổng dung lượng: " + total-size-text; color: #3498db; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+            if (eta-text != "") : Text { text: "Còn lại: " + eta-text; color: #e67e22; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+        }
     }
 }

@@ -30,11 +30,14 @@ pub fn get_mime_type(path: &Path) -> &'static str {
 /// Validates AWS credentials and bucket name.
 /// Returns an error message if invalid, or None if valid.
 pub fn validate_credentials(acc_key: &str, sec_key: &str, bucket: &str) -> Option<String> {
-    if acc_key.trim().is_empty() {
-        return Some("Access Key không được để trống".to_string());
-    }
-    if sec_key.trim().is_empty() {
-        return Some("Secret Key không được để trống".to_string());
+    let profile = crate::config::load_config().selected_profile;
+    if profile.is_empty() {
+        if acc_key.trim().is_empty() {
+            return Some("Access Key không được để trống".to_string());
+        }
+        if sec_key.trim().is_empty() {
+            return Some("Secret Key không được để trống".to_string());
+        }
     }
     if bucket.trim().is_empty() {
         return Some("Bucket name không được để trống".to_string());
@@ -190,19 +193,6 @@ impl FilteringStats {
             self.excluded_files as f64 / self.total_files as f64
         }
     }
-
-    pub fn size_savings(&self) -> f64 {
-        if self.total_size == 0 {
-            0.0
-        } else {
-            self.excluded_size as f64 / self.total_size as f64
-        }
-    }
-}
-
-/// Validates if a string is a valid glob pattern.
-pub fn is_valid_glob_pattern(pattern: &str) -> bool {
-    glob::Pattern::new(pattern).is_ok()
 }
 
 /// Validates a list of comma-separated glob patterns.
@@ -215,6 +205,15 @@ pub fn validate_glob_patterns(patterns_str: &str) -> Vec<String> {
         .filter(|s| glob::Pattern::new(s).is_err())
         .map(|s| s.to_string())
         .collect()
+}
+
+/// Reset một cờ "đang xử lý" (busy flag) trên UI thread, dùng cho mọi nút
+/// có trạng thái processing (is-testing, is-syncing, is-downloading, ...).
+pub fn reset_busy_flag<F>(ui: &slint::Weak<AppWindow>, setter: F)
+where
+    F: FnOnce(&AppWindow) + Send + 'static,
+{
+    let _ = ui.upgrade_in_event_loop(move |ui| setter(&ui));
 }
 
 /// Updates the UI status text and progress bar.
@@ -230,6 +229,53 @@ pub fn update_status(
         ui.set_progress(progress);
         ui.set_is_error(is_error);
     });
+}
+
+/// Appends a message to a log file.
+/// log_path can be a directory (appends to s3sync.log) or a file path.
+pub fn log_to_file(log_path: &str, message: &str) {
+    if log_path.is_empty() {
+        return;
+    }
+    let path = std::path::Path::new(log_path);
+    let file_path = if path.is_dir() {
+        path.join("s3sync.log")
+    } else {
+        path.to_path_buf()
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", message);
+    }
+}
+
+/// Appends a message to a CloudFront-specific log file with date in name.
+pub fn log_cloudfront_to_file(log_dir: &str, message: &str) {
+    if log_dir.is_empty() {
+        return;
+    }
+    let path = std::path::Path::new(log_dir);
+    if !path.is_dir() {
+        // If it's a file path, just use log_to_file
+        return log_to_file(log_dir, message);
+    }
+
+    let now = chrono::Local::now();
+    let filename = format!("cloudfront_log_{}.log", now.format("%d_%m_%Y"));
+    let file_path = path.join(filename);
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", message);
+    }
 }
 
 #[cfg(test)]
@@ -377,7 +423,6 @@ mod tests {
         };
 
         assert_eq!(stats.exclusion_rate(), 0.2);
-        assert_eq!(stats.size_savings(), 0.2);
     }
 
     #[test]

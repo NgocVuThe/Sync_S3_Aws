@@ -1,7 +1,7 @@
 import { Button, VerticalBox, LineEdit, HorizontalBox, ScrollView, ComboBox } from "std-widgets.slint";
 
 // Shared
-import { PathItem } from "shared/types.slint";
+import { PathItem, BucketConfigItem } from "shared/types.slint";
 import { Theme } from "shared/colors.slint";
 
 // Components
@@ -32,6 +32,8 @@ export component AppWindow inherits Window {
     in-out property <string> session-token;
     in-out property <string> region: "ap-northeast-1";
     in-out property <string> bucket-name;
+    in-out property <string> distribution-id;
+    in-out property <bool> auto-invalidate: false;
     in-out property <string> status-text: "Sẵn sàng";
     in-out property <float> progress: 0.0;
     in-out property <bool> show-config: true;
@@ -42,16 +44,33 @@ export component AppWindow inherits Window {
     in-out property <bool> is-selecting-folder: false;
     in-out property <bool> is-opening-log: false;
     in-out property <bool> is-selecting-base-path: false;
+    in-out property <bool> is-downloading: false;
+    in-out property <bool> is-syncing: false;
+    in-out property <bool> is-clearing-cache: false;
+    in-out property <bool> is-cf-connected: false;
+    in-out property <string> total-size-text: "";
+    in-out property <string> eta-text: "";
+    in-out property <string> download-target-path: "";
     in-out property <bool> show-filter-config: false;
     in-out property <bool> enable-filtering: true;
     in-out property <string> exclude-patterns-text: "";
     in-out property <string> include-patterns-text: "";
     in-out property <string> max-file-size-text: "100";
     in-out property <string> filter-stats: "";
+    in-out property <bool> is-logging-in: false;
+    in-out property <bool> is-testing: false;
+    in property <string> manual-sentinel;
+    
+    // AWS Profile properties
+    in-out property <string> selected-aws-profile: "";
+    in property <[string]> aws-profile-name-list: [];
+    in-out property <bool> selected-profile-is-sso: false;
     
     // Bucket Management Properties
-    in-out property <[string]> bucket-list: [];
+    in-out property <[BucketConfigItem]> bucket-list: [];
+    in-out property <[string]> bucket-name-list: [];
     in-out property <string> new-bucket-name: "";
+    in-out property <string> new-distribution-id: "";
     in-out property <int> editing-bucket-index: -1;
     in-out property <string> bucket-manager-error: "";
     in-out property <bool> show-confirm-delete: false;
@@ -77,19 +96,27 @@ export component AppWindow inherits Window {
     callback clear-folders();
     callback remove-folder(int);
     callback start-sync(string, string, string, string, string, [PathItem]);
+    callback select-download-folder();
+    callback execute-download();
     callback test-access(string, string, string, string, string);
+    callback bucket-selected(string);
+    callback clear-cache();
+    callback update-auto-invalidate(bool);
     callback open-settings();
     callback select-log-path();
     callback open-log-folder();
     callback select-base-path();
+    callback clear-base-path();
     callback toggle-filter-config();
     callback save-filter-config();
     callback reset-filter-config();
     callback preview-filtering();
+    callback profile-selected(string);
+    callback sso-login(string);
 
     // Bucket management callbacks
-    callback add-bucket(string);
-    callback update-bucket(int, string);
+    callback add-bucket(string, string);
+    callback update-bucket(int, string, string);
     callback delete-bucket(int);
 
     // Region management callbacks
@@ -116,7 +143,7 @@ export component AppWindow inherits Window {
                     text: "Setting Log Path";
                     clicked => {
                         settings-menu.close();
-                        select-log-path();
+                        root.select-log-path();
                     }
                 }
                 Button {
@@ -154,17 +181,32 @@ export component AppWindow inherits Window {
             settings-clicked => { settings-menu.show(); }
         }
 
-        AwsConfigSection {
+AwsConfigSection {
             access-key <=> root.access-key;
             secret-key <=> root.secret-key;
             session-token <=> root.session-token;
             region <=> root.region;
             bucket-name <=> root.bucket-name;
+            distribution-id <=> root.distribution-id;
+            auto-invalidate <=> root.auto-invalidate;
+            is-clearing-cache <=> root.is-clearing-cache;
+            is-cf-connected <=> root.is-cf-connected;
             region-list: root.region-list;
-            bucket-list: root.bucket-list;
+            bucket-name-list: root.bucket-name-list;
             show-config <=> root.show-config;
             test-access-error: root.test-access-error;
+            aws-profile-name-list: root.aws-profile-name-list;
+            selected-aws-profile <=> root.selected-aws-profile;
+            selected-profile-is-sso <=> root.selected-profile-is-sso;
+            is-logging-in <=> root.is-logging-in;
+            is-testing <=> root.is-testing;
+            manual-sentinel: root.manual-sentinel;
             test-access(a, s, t, r, b) => { root.test-access(a, s, t, r, b); }
+            bucket-selected(b) => { root.bucket-selected(b); }
+            clear-cache() => { root.clear-cache(); }
+            update-auto-invalidate(c) => { root.update-auto-invalidate(c); }
+            profile-selected(p) => { root.profile-selected(p); }
+            sso-login(p) => { root.sso-login(p); }
         }
 
         FolderPickerSection {
@@ -179,14 +221,23 @@ export component AppWindow inherits Window {
             bucket-name: root.bucket-name;
             has-log-path: root.log-path != "";
             is-opening-log: root.is-opening-log;
-            
+            download-target-path <=> root.download-target-path;
+            is-downloading <=> root.is-downloading;
+            is-syncing <=> root.is-syncing;
+            total-size-text: root.total-size-text;
+            eta-text: root.eta-text;
+            selected-aws-profile: root.selected-aws-profile;
+            manual-sentinel: root.manual-sentinel;
             select-folder => { root.select-folder(); }
             select-files => { root.select-files(); }
             clear-folders => { root.clear-folders(); }
             remove-folder(idx) => { root.remove-folder(idx); }
             start-sync(a, s, t, r, b, paths) => { root.start-sync(a, s, t, r, b, paths); }
+            select-download-folder => { root.select-download-folder(); }
+            execute-download => { root.execute-download(); }
             open-log-folder => { root.open-log-folder(); }
             select-base-path => { root.select-base-path(); }
+            clear-base-path => { root.clear-base-path(); }
         }
 
         FilterConfigSection {
@@ -213,13 +264,14 @@ export component AppWindow inherits Window {
     // --- Dialogs ---
     if (show-bucket-manager) : BucketManagerDialog {
         bucket-list: root.bucket-list;
-        new-name <=> root.new-bucket-name;
+        new-bucket-name <=> root.new-bucket-name;
+        new-distribution-id <=> root.new-distribution-id;
         editing-index <=> root.editing-bucket-index;
         error-message: root.bucket-manager-error;
         show-add-input <=> root.show-add-input;
         
-        add-bucket(name) => { root.add-bucket(name); }
-        update-bucket(idx, name) => { root.update-bucket(idx, name); }
+        add-bucket(name, dist-id) => { root.add-bucket(name, dist-id); }
+        update-bucket(idx, name, dist-id) => { root.update-bucket(idx, name, dist-id); }
         delete-clicked(idx, name) => { 
             root.bucket-to-delete-index = idx;
             root.bucket-to-delete-name = name;

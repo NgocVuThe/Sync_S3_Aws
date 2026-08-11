@@ -1,5 +1,6 @@
 import { Button, VerticalBox, LineEdit, HorizontalBox, ComboBox } from "std-widgets.slint";
 import { Theme } from "../shared/colors.slint";
+import { BucketConfigItem } from "../shared/types.slint";
 
 export component AwsConfigSection inherits Rectangle {
     in-out property <string> access-key;
@@ -7,12 +8,31 @@ export component AwsConfigSection inherits Rectangle {
     in-out property <string> session-token;
     in-out property <string> region;
     in-out property <string> bucket-name;
+    in-out property <string> distribution-id;
+    in-out property <bool> auto-invalidate: false;
+    in-out property <bool> is-clearing-cache: false;
+    in-out property <bool> is-cf-connected: false;
     in property <[string]> region-list;
-    in property <[string]> bucket-list;
+    in property <[string]> bucket-name-list;
     in-out property <bool> show-config: true;
     in property <string> test-access-error;
+    in property <[string]> aws-profile-name-list;
+    in-out property <string> selected-aws-profile: "";
+    in-out property <bool> selected-profile-is-sso: false;
+    in-out property <bool> is-logging-in: false;
+    in-out property <bool> is-testing: false;
+    in property <string> manual-sentinel;
+    
+    private property <bool> is-manual: selected-aws-profile == manual-sentinel || selected-aws-profile == "";
     
     callback test-access(string, string, string, string, string);
+    callback bucket-selected(string);
+    callback clear-cache();
+    callback update-auto-invalidate(bool);
+    callback profile-selected(string);
+    callback sso-login(string);
+    
+    private property <bool> has-distribution-id: distribution-id != "";
     
     background: Theme.bg-secondary;
     border-radius: 8px;
@@ -35,36 +55,142 @@ export component AwsConfigSection inherits Rectangle {
                     secret-key = "";
                     session-token = "";
                     bucket-name = "";
+                    distribution-id = "";
                 }
             }
         }
         if (show-config) : VerticalBox {
             padding: 0;
             spacing: 8px;
-            LineEdit { placeholder-text: "AWS Access Key ID"; text <=> access-key; }
-            LineEdit { placeholder-text: "AWS Secret Access Key"; input-type: password; text <=> secret-key; }
-            LineEdit { placeholder-text: "AWS Session Token (Optional)"; text <=> session-token; }
             HorizontalBox {
                 spacing: 10px;
-                Text { text: "Region:"; color: Theme.text-secondary; vertical-alignment: center; }
-                ComboBox { model: region-list; current-value <=> region; }
+                Text { text: "Profile:"; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    model: aws-profile-name-list;
+                    current-value <=> selected-aws-profile;
+                    selected(value) => { profile-selected(value); }
+                }
+            }
+            if (selected-profile-is-sso) : HorizontalBox {
+                spacing: 10px;
+                Button {
+                    text: is-logging-in ? "Đang xử lý..." : "Login via AWS SSO";
+                    height: 28px;
+                    enabled: !is-logging-in;
+                    clicked => {
+                        is-logging-in = true;
+                        sso-login(selected-aws-profile);
+                    }
+                }
+            }
+            if (is-manual) : VerticalLayout {
+                spacing: 8px;
+                LineEdit { placeholder-text: "AWS Access Key ID"; text <=> access-key; }
+                LineEdit { placeholder-text: "AWS Secret Access Key"; input-type: password; text <=> secret-key; }
+                LineEdit { placeholder-text: "AWS Session Token (Optional)"; text <=> session-token; }
             }
             HorizontalBox {
                 spacing: 10px;
                 Text { text: "Bucket:"; color: Theme.text-secondary; vertical-alignment: center; }
-                ComboBox { model: bucket-list; current-value <=> bucket-name; }
+                ComboBox { 
+                    model: bucket-name-list; 
+                    current-value <=> bucket-name;
+                    selected(bucket) => { bucket-selected(bucket); }
+                }
+            }
+            if (bucket-name != "") : VerticalLayout {
+                spacing: 4px;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text { text: "CloudFront:"; color: Theme.text-secondary; vertical-alignment: center; }
+                    if (distribution-id != "") : Text { 
+                        text: distribution-id; 
+                        color: Theme.accent-green; 
+                        font-size: 12px; 
+                        vertical-alignment: center; 
+                    }
+                    if (distribution-id == "") : Text { 
+                        text: "Not configured"; 
+                        color: Theme.text-secondary; 
+                        font-size: 12px; 
+                        vertical-alignment: center; 
+                    }
+                }
+                if (has-distribution-id) : HorizontalBox {
+                    spacing: 10px;
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            width: 32px;
+                            height: 16px;
+                            background: auto-invalidate ? Theme.accent-blue : Theme.border-default;
+                            border-radius: 8px;
+                            y: (parent.height - self.height) / 2;
+                            
+                            TouchArea { 
+                                clicked => { 
+                                    auto-invalidate = !auto-invalidate;
+                                    update-auto-invalidate(auto-invalidate);
+                                } 
+                                mouse-cursor: pointer; 
+                            }
+                            
+                            Rectangle {
+                                x: auto-invalidate ? 16px : 2px;
+                                y: 2px;
+                                width: 12px;
+                                height: 12px;
+                                background: white;
+                                border-radius: 6px;
+                                animate x { duration: 150ms; }
+                            }
+                        }
+                        Text {
+                            text: "Auto-invalidate after sync";
+                            color: Theme.text-secondary;
+                            vertical-alignment: center;
+                            font-size: 13px;
+                        }
+                    }
+                    Button {
+                        text: is-clearing-cache ? "Clearing..." : "Clear Cache Now";
+                        width: 120px;
+                        height: 28px;
+                        enabled: !is-clearing-cache && is-cf-connected;
+                        clicked => { clear-cache(); }
+                    }
+                }
             }
             Button {
-                text: "Test Access";
-                enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
-                clicked => { test-access(access-key, secret-key, session-token, region, bucket-name); }
+                text: is-testing ? "Đang kiểm tra..." : "Test Access";
+                enabled: (is-manual ? (access-key != "" && secret-key != "") : true) && bucket-name != "" && region != "" && !is-testing;
+                clicked => {
+                    is-testing = true;
+                    test-access(access-key, secret-key, session-token, region, bucket-name);
+                }
             }
             Text { text: test-access-error; color: Theme.accent-red; horizontal-alignment: center; font-size: 11px; }
         }
-        if (!show-config) : Text {
-            text: "Cấu hình đã sẵn sàng (Bucket: " + bucket-name + ")";
-            color: Theme.accent-green;
-            font-size: 12px;
+        if (!show-config) : VerticalLayout {
+            spacing: 4px;
+            Text { 
+                text: "Cấu hình sẵn sàng (Bucket: " + bucket-name + ")"; 
+                color: Theme.accent-green; 
+                font-size: 12px; 
+            }
+            if (distribution-id != "") : Text { 
+                text: "CloudFront: " + distribution-id + (auto-invalidate ? " [Auto-invalidate]" : ""); 
+                color: Theme.text-secondary; 
+                font-size: 11px; 
+            }
+            if (distribution-id != "" || bucket-name != "") : Button {
+                text: is-clearing-cache ? "Clearing..." : "Clear Cache Now";
+                width: 120px;
+                height: 24px;
+                enabled: !is-clearing-cache && distribution-id != "" && is-cf-connected;
+                clicked => { clear-cache(); }
+            }
         }
     }
 }

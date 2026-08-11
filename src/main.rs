@@ -6,8 +6,8 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use rust_project::*;
 
 mod config;
-mod s3_client;
-mod ui_handlers;
+mod handlers;
+mod s3;
 mod utils;
 
 #[tokio::main]
@@ -30,13 +30,14 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Loaded log_path: '{}'", app_config.log_path);
     
     let ui = AppWindow::new()?;
+    ui.set_manual_sentinel(s3::MANUAL_SENTINEL.into());
     
     // Apply saved config to UI
     if !app_config.log_path.is_empty() {
-        ui.set_log_path(app_config.log_path.into());
+        ui.set_log_path(app_config.log_path.clone().into());
     }
     if !app_config.s3_base_path.is_empty() {
-        ui.set_s3_base_path(app_config.s3_base_path.into());
+        ui.set_s3_base_path(app_config.s3_base_path.clone().into());
     }
     
     // Apply filter config to UI
@@ -50,20 +51,54 @@ async fn main() -> Result<(), anyhow::Error> {
     ui.set_max_file_size_text(max_size_text.into());
 
     if !app_config.selected_bucket.is_empty() {
-        ui.set_bucket_name(app_config.selected_bucket.into());
+        ui.set_bucket_name(app_config.selected_bucket.clone().into());
+        // Set distribution ID on startup
+        if let Some(dist_id) = app_config.get_distribution_id(&app_config.selected_bucket) {
+            ui.set_distribution_id(dist_id.into());
+        }
     }
     if !app_config.selected_region.is_empty() {
-        ui.set_region(app_config.selected_region.into());
+        ui.set_region(app_config.selected_region.clone().into());
     }
+    ui.set_auto_invalidate(app_config.auto_invalidate);
 
-    // Set lists for ComboBoxes
-    let bucket_model = slint::VecModel::from(app_config.buckets.iter().map(|s| s.clone().into()).collect::<Vec<slint::SharedString>>());
-    ui.set_bucket_list(slint::ModelRc::from(std::rc::Rc::new(bucket_model)));
+// Set lists for ComboBoxes
+    let bucket_names: Vec<slint::SharedString> = app_config
+        .bucket_names()
+        .iter()
+        .map(|s| s.clone().into())
+        .collect();
+    ui.set_bucket_name_list(slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(
+        bucket_names,
+    ))));
 
     let region_model = slint::VecModel::from(app_config.regions.iter().map(|s| s.clone().into()).collect::<Vec<slint::SharedString>>());
     ui.set_region_list(slint::ModelRc::from(std::rc::Rc::new(region_model)));
 
-    ui_handlers::setup_all_handlers(&ui);
+    // Load AWS profiles from ~/.aws/config
+    let aws_profiles = s3::aws_profiles::list_aws_profiles();
+    let mut profile_names: Vec<slint::SharedString> = aws_profiles
+        .iter()
+        .map(|p| slint::SharedString::from(p.name.as_str()))
+        .collect();
+    // Add sentinel entry at the end for manual credential entry
+    profile_names.push(slint::SharedString::from(s3::MANUAL_SENTINEL));
+    let profile_name_model = slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(profile_names)));
+    ui.set_aws_profile_name_list(profile_name_model);
+
+    if !app_config.selected_profile.is_empty() {
+        ui.set_selected_aws_profile(app_config.selected_profile.clone().into());
+        let is_sso = aws_profiles
+            .iter()
+            .any(|p| p.name == app_config.selected_profile && p.is_sso);
+        ui.set_selected_profile_is_sso(is_sso);
+    } else {
+        // Default to sentinel in the ComboBox
+        ui.set_selected_aws_profile(s3::MANUAL_SENTINEL.into());
+        ui.set_selected_profile_is_sso(false);
+    }
+
+    handlers::setup_all_handlers(&ui);
 
     ui.run()?;
     Ok(())
