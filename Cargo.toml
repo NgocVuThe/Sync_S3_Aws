@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 slint = "1.9.0"
 tokio = { version = "1.36", features = ["full"] }
-aws-config = { version = "1.5", features = ["behavior-version-latest"] }
+aws-config = { version = "1.5", features = ["behavior-version-latest", "sso"] }
 aws-sdk-s3 = { version = "1.58", features = ["behavior-version-latest"] }
 aws-sdk-cloudfront = { version = "1.53", features = ["behavior-version-latest"] }
 rfd = "0.15"

@@ -16,11 +16,21 @@ export component AwsConfigSection inherits Rectangle {
     in property <[string]> bucket-name-list;
     in-out property <bool> show-config: true;
     in property <string> test-access-error;
+    in property <[string]> aws-profile-name-list;
+    in-out property <string> selected-aws-profile: "";
+    in-out property <bool> selected-profile-is-sso: false;
+    in-out property <bool> is-logging-in: false;
+    in-out property <bool> is-testing: false;
+    in property <string> manual-sentinel;
+    
+    private property <bool> is-manual: selected-aws-profile == manual-sentinel || selected-aws-profile == "";
     
     callback test-access(string, string, string, string, string);
     callback bucket-selected(string);
     callback clear-cache();
     callback update-auto-invalidate(bool);
+    callback profile-selected(string);
+    callback sso-login(string);
     
     private property <bool> has-distribution-id: distribution-id != "";
     
@@ -52,9 +62,33 @@ export component AwsConfigSection inherits Rectangle {
         if (show-config) : VerticalBox {
             padding: 0;
             spacing: 8px;
-            LineEdit { placeholder-text: "AWS Access Key ID"; text <=> access-key; }
-            LineEdit { placeholder-text: "AWS Secret Access Key"; input-type: password; text <=> secret-key; }
-            LineEdit { placeholder-text: "AWS Session Token (Optional)"; text <=> session-token; }
+            HorizontalBox {
+                spacing: 10px;
+                Text { text: "Profile:"; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    model: aws-profile-name-list;
+                    current-value <=> selected-aws-profile;
+                    selected(value) => { profile-selected(value); }
+                }
+            }
+            if (selected-profile-is-sso) : HorizontalBox {
+                spacing: 10px;
+                Button {
+                    text: is-logging-in ? "Đang xử lý..." : "Login via AWS SSO";
+                    height: 28px;
+                    enabled: !is-logging-in;
+                    clicked => {
+                        is-logging-in = true;
+                        sso-login(selected-aws-profile);
+                    }
+                }
+            }
+            if (is-manual) : VerticalLayout {
+                spacing: 8px;
+                LineEdit { placeholder-text: "AWS Access Key ID"; text <=> access-key; }
+                LineEdit { placeholder-text: "AWS Secret Access Key"; input-type: password; text <=> secret-key; }
+                LineEdit { placeholder-text: "AWS Session Token (Optional)"; text <=> session-token; }
+            }
             HorizontalBox {
                 spacing: 10px;
                 Text { text: "Bucket:"; color: Theme.text-secondary; vertical-alignment: center; }
@@ -129,9 +163,12 @@ export component AwsConfigSection inherits Rectangle {
                 }
             }
             Button {
-                text: "Test Access";
-                enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "";
-                clicked => { test-access(access-key, secret-key, session-token, region, bucket-name); }
+                text: is-testing ? "Đang kiểm tra..." : "Test Access";
+                enabled: (is-manual ? (access-key != "" && secret-key != "") : true) && bucket-name != "" && region != "" && !is-testing;
+                clicked => {
+                    is-testing = true;
+                    test-access(access-key, secret-key, session-token, region, bucket-name);
+                }
             }
             Text { text: test-access-error; color: Theme.accent-red; horizontal-alignment: center; font-size: 11px; }
         }

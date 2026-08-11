@@ -3,7 +3,7 @@ use slint::{Model, ModelRc, VecModel};
 use std::rc::Rc;
 use tokio::time;
 use tracing::{error, warn};
-use crate::s3::{create_s3_client, find_best_s3_prefix, get_preview_prefix};
+use crate::s3::{find_best_s3_prefix, get_preview_prefix, try_create_preview_client};
 
 /// Calculates the S3 path for a given local path and base path.
 fn calculate_s3_path(p: &std::path::Path, base_path_buf: &std::path::Path) -> String {
@@ -53,23 +53,22 @@ pub fn setup_select_folder_handler(ui: &AppWindow) {
                     let base_path_buf = std::path::PathBuf::from(&s3_base_path);
 
                     // Try to create S3 client for accurate calculation
-                    let client = if !acc_key.is_empty() && !sec_key.is_empty() && !bucket.is_empty() {
-                        match create_s3_client(
-                            acc_key,
-                            sec_key,
-                            if sess_token.is_empty() { None } else { Some(sess_token) },
-                            region
-                        ).await {
-                            Ok(c) => Some(c),
-                            Err(e) => {
-                                error!("Failed to create S3 client for path preview: {:?}", e);
-                                crate::utils::update_status(&ui_handle_task, "Cảnh báo: Không thể kết nối S3, sử dụng đường dẫn xem trước".to_string(), 0.0, false);
-                                time::sleep(time::Duration::from_secs(2)).await; // Show message briefly
-                                None
-                            }
+                    let selected_profile = crate::config::load_config().selected_profile;
+                    let client = match try_create_preview_client(
+                        selected_profile,
+                        acc_key,
+                        sec_key,
+                        if sess_token.is_empty() { None } else { Some(sess_token) },
+                        region,
+                        bucket.clone(),
+                    ).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!("Failed to create S3 client for path preview: {:?}", e);
+                            crate::utils::update_status(&ui_handle_task, "Cảnh báo: Không thể kết nối S3, sử dụng đường dẫn xem trước".to_string(), 0.0, false);
+                            time::sleep(time::Duration::from_secs(2)).await; // Show message briefly
+                            None
                         }
-                    } else {
-                        None
                     };
 
                     let cache: crate::s3::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
@@ -151,23 +150,22 @@ pub fn setup_select_files_handler(ui: &AppWindow) {
                     let base_path_buf = std::path::PathBuf::from(&s3_base_path);
 
                     // Try to create S3 client for accurate calculation
-                    let client = if !acc_key.is_empty() && !sec_key.is_empty() && !bucket.is_empty() {
-                        match create_s3_client(
-                            acc_key,
-                            sec_key,
-                            if sess_token.is_empty() { None } else { Some(sess_token) },
-                            region
-                        ).await {
-                            Ok(c) => Some(c),
-                            Err(e) => {
-                                error!("Failed to create S3 client for path preview: {:?}", e);
-                                crate::utils::update_status(&ui_handle_task, "Cảnh báo: Không thể kết nối S3, sử dụng đường dẫn xem trước".to_string(), 0.0, false);
-                                time::sleep(time::Duration::from_secs(2)).await; // Show message briefly
-                                None
-                            }
+                    let selected_profile = crate::config::load_config().selected_profile;
+                    let client = match try_create_preview_client(
+                        selected_profile,
+                        acc_key,
+                        sec_key,
+                        if sess_token.is_empty() { None } else { Some(sess_token) },
+                        region,
+                        bucket.clone(),
+                    ).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!("Failed to create S3 client for path preview: {:?}", e);
+                            crate::utils::update_status(&ui_handle_task, "Cảnh báo: Không thể kết nối S3, sử dụng đường dẫn xem trước".to_string(), 0.0, false);
+                            time::sleep(time::Duration::from_secs(2)).await; // Show message briefly
+                            None
                         }
-                    } else {
-                        None
                     };
 
                     let cache: crate::s3::GlobalPrefixCache = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
@@ -304,27 +302,20 @@ pub fn setup_select_base_path_handler(ui: &AppWindow) {
                     );
 
                     // 2. Try to create S3 client
-                    let client = if !acc_key.is_empty() && !sec_key.is_empty() && !bucket.is_empty() {
-                        match create_s3_client(
-                            acc_key,
-                            sec_key,
-                            if sess_token.is_empty() {
-                                None
-                            } else {
-                                Some(sess_token)
-                            },
-                            region,
-                        )
-                        .await
-                        {
-                            Ok(c) => Some(c),
-                            Err(e) => {
-                                warn!("S3 client creation failed, using offline calculation: {}", e);
-                                None
-                            }
+                    let selected_profile = crate::config::load_config().selected_profile;
+                    let client = match try_create_preview_client(
+                        selected_profile,
+                        acc_key,
+                        sec_key,
+                        if sess_token.is_empty() { None } else { Some(sess_token) },
+                        region,
+                        bucket.clone(),
+                    ).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("S3 client creation failed, using offline calculation: {}", e);
+                            None
                         }
-                    } else {
-                        None
                     };
 
                     let base_path_buf = std::path::PathBuf::from(&path_str);

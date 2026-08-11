@@ -1,5 +1,5 @@
 use crate::*;
-use crate::s3::{create_s3_client, download_from_s3};
+use crate::s3::{create_s3_client, download_from_s3, resolve_cred_source};
 use crate::utils::{validate_credentials, update_status};
 use std::sync::Arc;
 use slint::ComponentHandle;
@@ -46,17 +46,20 @@ pub fn setup_download_handler(ui: &AppWindow) {
                 .show();
 
             if confirmed != rfd::MessageDialogResult::Yes {
+                crate::utils::reset_busy_flag(&ui_handle_execute, |ui| ui.set_is_downloading(false));
                 return;
             }
         }
 
         // Validate
         if let Some(err) = validate_credentials(&acc_key, &sec_key, &bucket) {
+            crate::utils::reset_busy_flag(&ui_handle_execute, |ui| ui.set_is_downloading(false));
             update_status(&ui_handle_execute, err, 0.0, true);
             return;
         }
 
         if local_dir_str.is_empty() {
+            crate::utils::reset_busy_flag(&ui_handle_execute, |ui| ui.set_is_downloading(false));
             update_status(&ui_handle_execute, "Vui lòng chọn thư mục lưu trữ trước.".to_string(), 0.0, true);
             return;
         }
@@ -65,14 +68,17 @@ pub fn setup_download_handler(ui: &AppWindow) {
         
         tokio::spawn(async move {
             let sess_token_opt = if sess_token.is_empty() { None } else { Some(sess_token) };
+            let cred = resolve_cred_source(acc_key, sec_key, sess_token_opt);
             
-            match create_s3_client(acc_key, sec_key, sess_token_opt, region).await {
+            match create_s3_client(cred, region).await {
                 Ok(client) => {
                     let client = Arc::new(client);
                     if let Err(e) = download_from_s3(client, bucket, prefix, local_dir_str, ui_handle_clone.clone()).await {
+                        crate::utils::reset_busy_flag(&ui_handle_clone, |ui| ui.set_is_downloading(false));
                         update_status(&ui_handle_clone, e, 0.0, true);
                     } else {
                         // Reset download path on success to revert button text
+                        crate::utils::reset_busy_flag(&ui_handle_clone, |ui| ui.set_is_downloading(false));
                         let ui_weak = ui_handle_clone.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak.upgrade() {
@@ -82,6 +88,7 @@ pub fn setup_download_handler(ui: &AppWindow) {
                     }
                 }
                 Err(e) => {
+                    crate::utils::reset_busy_flag(&ui_handle_clone, |ui| ui.set_is_downloading(false));
                     update_status(&ui_handle_clone, format!("Lỗi khởi tạo S3 Client: {}", e), 0.0, true);
                 }
             }

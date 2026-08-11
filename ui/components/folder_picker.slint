@@ -14,10 +14,15 @@ export component FolderPickerSection inherits Rectangle {
     in property <string> bucket-name;
     in property <bool> has-log-path: false;
     in property <bool> is-opening-log: false;
-    in property <bool> is-downloading: false;
+    in-out property <bool> is-downloading: false;
+    in-out property <bool> is-syncing: false;
     in property <string> total-size-text: "";
     in property <string> eta-text: "";
     in-out property <string> download-target-path: "";
+    in property <string> selected-aws-profile: "";
+    in property <string> manual-sentinel;
+
+    private property <bool> has-cred: (selected-aws-profile != "" && selected-aws-profile != manual-sentinel) || (access-key != "" && secret-key != "");
 
     callback select-folder();
     callback select-files();
@@ -85,16 +90,17 @@ export component FolderPickerSection inherits Rectangle {
             spacing: 8px;
             Button { text: "Thêm Folder"; height: 28px; primary: true; enabled: !is-selecting-folder; clicked => { select-folder() } }
             Button { text: "Thêm File"; height: 28px; enabled: !is-selecting-folder; clicked => { select-files() } }
-            Button { text: "Sync Now"; height: 28px; primary: true; enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && local-paths.length > 0; clicked => { start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths); } }
+            Button { text: is-syncing ? "Đang sync..." : "Sync Now"; height: 28px; primary: true; enabled: has-cred && bucket-name != "" && region != "" && local-paths.length > 0 && !is-syncing && !is-downloading; clicked => { is-syncing = true; start-sync(access-key, secret-key, session-token, region, bucket-name, local-paths); } }
 Button { 
-                text: download-target-path == "" ? "Download" : "Start Download"; 
+                text: is-downloading ? "Đang tải..." : (download-target-path == "" ? "Download" : "Start Download"); 
                 height: 28px; 
                 primary: download-target-path != "";
-                enabled: access-key != "" && secret-key != "" && bucket-name != "" && region != "" && !is-downloading; 
+                enabled: has-cred && bucket-name != "" && region != "" && !is-downloading && !is-syncing; 
                 clicked => { 
                     if (download-target-path == "") {
                         select-download-folder();
                     } else {
+                        is-downloading = true;
                         execute-download();
                     }
                 } 

@@ -30,11 +30,14 @@ pub fn get_mime_type(path: &Path) -> &'static str {
 /// Validates AWS credentials and bucket name.
 /// Returns an error message if invalid, or None if valid.
 pub fn validate_credentials(acc_key: &str, sec_key: &str, bucket: &str) -> Option<String> {
-    if acc_key.trim().is_empty() {
-        return Some("Access Key không được để trống".to_string());
-    }
-    if sec_key.trim().is_empty() {
-        return Some("Secret Key không được để trống".to_string());
+    let profile = crate::config::load_config().selected_profile;
+    if profile.is_empty() {
+        if acc_key.trim().is_empty() {
+            return Some("Access Key không được để trống".to_string());
+        }
+        if sec_key.trim().is_empty() {
+            return Some("Secret Key không được để trống".to_string());
+        }
     }
     if bucket.trim().is_empty() {
         return Some("Bucket name không được để trống".to_string());
@@ -202,6 +205,15 @@ pub fn validate_glob_patterns(patterns_str: &str) -> Vec<String> {
         .filter(|s| glob::Pattern::new(s).is_err())
         .map(|s| s.to_string())
         .collect()
+}
+
+/// Reset một cờ "đang xử lý" (busy flag) trên UI thread, dùng cho mọi nút
+/// có trạng thái processing (is-testing, is-syncing, is-downloading, ...).
+pub fn reset_busy_flag<F>(ui: &slint::Weak<AppWindow>, setter: F)
+where
+    F: FnOnce(&AppWindow) + Send + 'static,
+{
+    let _ = ui.upgrade_in_event_loop(move |ui| setter(&ui));
 }
 
 /// Updates the UI status text and progress bar.

@@ -131,6 +131,8 @@ pub struct AppConfig {
     pub selected_region: String,
     #[serde(default)]
     pub auto_invalidate: bool,
+    #[serde(default)]
+    pub selected_profile: String,
 }
 
 fn default_region() -> String {

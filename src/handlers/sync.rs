@@ -1,7 +1,7 @@
 use crate::*;
 use slint::Model;
 use tracing::{error, info};
-use crate::s3::{create_s3_client, sync_to_s3, create_cloudfront_client, invalidate_cache};
+use crate::s3::{create_s3_client, sync_to_s3, create_cloudfront_client, invalidate_cache, resolve_cred_source};
 
 /// Sets up the start sync handler.
 pub fn setup_start_sync_handler(ui: &AppWindow) {
@@ -33,11 +33,13 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
             // Validate inputs
             if let Some(err) = crate::utils::validate_credentials(&acc_key, &sec_key, &bucket_name)
             {
+                crate::utils::reset_busy_flag(&ui_handle, |ui| ui.set_is_syncing(false));
                 crate::utils::update_status(&ui_handle, err, 0.0, true);
                 return;
             }
 
             if mappings.is_empty() {
+                crate::utils::reset_busy_flag(&ui_handle, |ui| ui.set_is_syncing(false));
                 crate::utils::update_status(
                     &ui_handle,
                     "Không có file hoặc thư mục nào để upload".to_string(),
@@ -50,7 +52,7 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
             let ui_handle_cloned = ui_handle.clone();
 
             tokio::spawn(async move {
-                match create_s3_client(
+                let cred = resolve_cred_source(
                     acc_key.to_string(),
                     sec_key.to_string(),
                     if sess_token.is_empty() {
@@ -58,6 +60,9 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                     } else {
                         Some(sess_token.to_string())
                     },
+                );
+                match create_s3_client(
+                    cred,
                     region_str,
                 )
                 .await
@@ -69,6 +74,7 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                             sync_to_s3(client, bucket_name, mappings, ui_handle_cloned.clone(), log_path.clone()).await
                         {
                             error!("Sync failed: {}", e);
+                            crate::utils::reset_busy_flag(&ui_handle_cloned, |ui| ui.set_is_syncing(false));
                             return;
                         }
 
@@ -81,10 +87,13 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                                 false,
                             );
 
-                            match create_cloudfront_client(
+                            let cf_cred = resolve_cred_source(
                                 acc_key_clone,
                                 sec_key_clone,
                                 sess_token_opt,
+                            );
+                            match create_cloudfront_client(
+                                cf_cred,
                                 region_str_for_cf,
                             ).await {
                                 Ok(cf_client) => {
@@ -162,6 +171,11 @@ pub fn setup_start_sync_handler(ui: &AppWindow) {
                         );
                     }
                 }
+                // Reset is_syncing on every terminal path that reaches here:
+                // - create_s3_client Err (falls through from above)
+                // - sync_to_s3 OK + no auto-invalidate (skips CF block)
+                // - sync_to_s3 OK + auto-invalidate: CF OK or CF Err (all CF branches fall through)
+                crate::utils::reset_busy_flag(&ui_handle_cloned, |ui| ui.set_is_syncing(false));
             });
         }
     });

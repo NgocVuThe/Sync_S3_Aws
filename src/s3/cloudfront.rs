@@ -2,19 +2,26 @@ use aws_sdk_cloudfront::Client;
 use aws_sdk_cloudfront::config::{Credentials, Region};
 use aws_sdk_cloudfront::types::{InvalidationBatch, Paths};
 use tracing::info;
+use crate::s3::AwsCredSource;
 
 pub async fn create_cloudfront_client(
-    acc_key: String,
-    sec_key: String,
-    sess_token: Option<String>,
+    cred: AwsCredSource,
     region: String,
 ) -> Result<Client, aws_sdk_cloudfront::Error> {
-    let credentials = Credentials::new(acc_key, sec_key, sess_token, None, "manual");
-    let config = aws_config::from_env()
-        .credentials_provider(credentials)
-        .region(Region::new(region))
-        .load()
-        .await;
+    let mut builder = aws_config::from_env().region(Region::new(region));
+    builder = match cred {
+        AwsCredSource::Manual {
+            access_key,
+            secret_key,
+            session_token,
+        } => {
+            let creds =
+                Credentials::new(access_key, secret_key, session_token, None, "manual");
+            builder.credentials_provider(creds)
+        }
+        AwsCredSource::Profile { name } => builder.profile_name(name),
+    };
+    let config = builder.load().await;
     Ok(Client::new(&config))
 }
 

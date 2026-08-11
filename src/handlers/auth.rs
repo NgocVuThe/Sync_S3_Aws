@@ -1,5 +1,5 @@
 use crate::AppWindow;
-use crate::s3::{create_cloudfront_client, create_s3_client, test_bucket_access, test_cloudfront_access};
+use crate::s3::{create_cloudfront_client, create_s3_client, test_bucket_access, test_cloudfront_access, resolve_cred_source};
 use slint::ComponentHandle;
 use tracing::{error, info};
 
@@ -24,6 +24,7 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
             {
                 crate::utils::update_status(&ui_handle, err.clone(), 0.0, true);
                 let _ = ui_handle.upgrade_in_event_loop(|ui: AppWindow| ui.set_test_access_error(err.into()));
+                crate::utils::reset_busy_flag(&ui_handle, |ui: &AppWindow| ui.set_is_testing(false));
                 return;
             }
 
@@ -39,11 +40,10 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                 let _ = ui_handle_cloned.upgrade_in_event_loop(|ui: AppWindow| ui.set_test_access_error("".into()));
                 
                 let sess_token_opt = if sess_token.is_empty() { None } else { Some(sess_token.to_string()) };
+                let cred = resolve_cred_source(acc_key.to_string(), sec_key.to_string(), sess_token_opt.clone());
                 
                 match create_s3_client(
-                    acc_key.to_string(),
-                    sec_key.to_string(),
-                    sess_token_opt.clone(),
+                    cred,
                     region_str.clone(),
                 )
                 .await
@@ -62,10 +62,9 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                                     false,
                                 );
                                 
+                                let cf_cred = resolve_cred_source(acc_key.to_string(), sec_key.to_string(), sess_token_opt);
                                 match create_cloudfront_client(
-                                    acc_key.to_string(),
-                                    sec_key.to_string(),
-                                    sess_token_opt,
+                                    cf_cred,
                                     region_str,
                                 ).await {
                                     Ok(cf_client) => {
@@ -90,6 +89,7 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                                                 );
                                                 let _ = ui_handle_cloned.upgrade_in_event_loop(|ui: AppWindow| ui.set_is_cf_connected(false));
                                                 let _ = ui_handle_cloned.upgrade_in_event_loop(move |ui: AppWindow| ui.set_test_access_error(format!("CloudFront: {}", e).into()));
+                                                crate::utils::reset_busy_flag(&ui_handle_cloned, |ui: &AppWindow| ui.set_is_testing(false));
                                                 return;
                                             }
                                         }
@@ -102,6 +102,7 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                                             0.7,
                                             true,
                                         );
+                                        crate::utils::reset_busy_flag(&ui_handle_cloned, |ui: &AppWindow| ui.set_is_testing(false));
                                         return;
                                     }
                                 }
@@ -117,6 +118,7 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                             let _ = ui_handle_cloned
                                 .upgrade_in_event_loop(|ui: AppWindow| ui.set_show_config(false));
                             let _ = ui_handle_cloned.upgrade_in_event_loop(|ui: AppWindow| ui.set_test_access_error("".into()));
+                            crate::utils::reset_busy_flag(&ui_handle_cloned, |ui: &AppWindow| ui.set_is_testing(false));
                         }
                         Err(e) => {
                             error!("Test Access thất bại: {:?}", e);
@@ -127,6 +129,7 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                                 true,
                             );
                             let _ = ui_handle_cloned.upgrade_in_event_loop(move |ui: AppWindow| ui.set_test_access_error(format!("Lỗi: {}", e).into()));
+                            crate::utils::reset_busy_flag(&ui_handle_cloned, |ui: &AppWindow| ui.set_is_testing(false));
                         }
                     },
                     Err(e) => {
@@ -138,6 +141,7 @@ pub fn setup_test_access_handler(ui: &AppWindow) {
                             true,
                         );
                         let _ = ui_handle_cloned.upgrade_in_event_loop(move |ui: AppWindow| ui.set_test_access_error(format!("Lỗi tạo client: {}", e).into()));
+                        crate::utils::reset_busy_flag(&ui_handle_cloned, |ui: &AppWindow| ui.set_is_testing(false));
                     }
                 }
             });
@@ -213,14 +217,13 @@ pub fn setup_clear_cache_handler(ui: &AppWindow) {
             });
 
             let sess_token_opt = if sess_token.is_empty() { None } else { Some(sess_token) };
+            let cred = resolve_cred_source(acc_key, sec_key, sess_token_opt);
             let ui_handle_for_spawn = ui_handle.clone();
 
             // Spawn with already-captured data, NO upgrade() inside
             tokio::spawn(async move {
                 match crate::s3::create_cloudfront_client(
-                    acc_key,
-                    sec_key,
-                    sess_token_opt,
+                    cred,
                     region,
                 ).await {
                     Ok(client) => {
@@ -284,6 +287,77 @@ pub fn setup_clear_cache_handler(ui: &AppWindow) {
                         });
                     }
                 }
+            });
+        }
+    });
+}
+
+/// Sets up the SSO login handler.
+pub fn setup_sso_login_handler(ui: &AppWindow) {
+    ui.on_sso_login({
+        let ui_handle = ui.as_weak();
+        move |profile: slint::SharedString| {
+            let profile_str = profile.to_string();
+            if profile_str.is_empty() {
+                return;
+            }
+            let ui_handle_cloned = ui_handle.clone();
+            tokio::spawn(async move {
+                crate::utils::update_status(
+                    &ui_handle_cloned,
+                    format!("Đang mở trình duyệt để đăng nhập SSO ({})...", profile_str),
+                    0.0,
+                    false,
+                );
+                match crate::s3::run_sso_login(&profile_str).await {
+                    Ok(_) => {
+                        crate::utils::update_status(
+                            &ui_handle_cloned,
+                            "Đăng nhập SSO thành công. Có thể Test Access.".to_string(),
+                            0.0,
+                            false,
+                        );
+                        let _ = ui_handle_cloned.upgrade_in_event_loop(|ui: AppWindow| ui.set_is_logging_in(false));
+                    }
+                    Err(e) => {
+                        crate::utils::update_status(
+                            &ui_handle_cloned,
+                            format!("Đăng nhập SSO thất bại: {}", e),
+                            0.0,
+                            true,
+                        );
+                        let _ = ui_handle_cloned.upgrade_in_event_loop(|ui: AppWindow| ui.set_is_logging_in(false));
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// Sets up the profile selected handler — saves selected profile to config.
+pub fn setup_profile_selected_handler(ui: &AppWindow) {
+    let ui_handle = ui.as_weak();
+    ui.on_profile_selected({
+        move |profile: slint::SharedString| {
+            let profile_str = profile.to_string();
+            // Sentinel maps to empty string in config
+            let config_profile = if profile_str == crate::s3::MANUAL_SENTINEL {
+                String::new()
+            } else {
+                profile_str.clone()
+            };
+            let mut config = crate::config::load_config();
+            config.selected_profile = config_profile;
+            let _ = crate::config::save_config(&config);
+
+            // Look up is_sso for the selected profile
+            let profiles = crate::s3::list_aws_profiles();
+            let is_sso = profiles
+                .iter()
+                .any(|p| p.name == profile_str && p.is_sso);
+
+            let _ = ui_handle.upgrade_in_event_loop(move |ui: AppWindow| {
+                ui.set_selected_profile_is_sso(is_sso);
             });
         }
     });

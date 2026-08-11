@@ -45,6 +45,7 @@ export component AppWindow inherits Window {
     in-out property <bool> is-opening-log: false;
     in-out property <bool> is-selecting-base-path: false;
     in-out property <bool> is-downloading: false;
+    in-out property <bool> is-syncing: false;
     in-out property <bool> is-clearing-cache: false;
     in-out property <bool> is-cf-connected: false;
     in-out property <string> total-size-text: "";
@@ -56,6 +57,14 @@ export component AppWindow inherits Window {
     in-out property <string> include-patterns-text: "";
     in-out property <string> max-file-size-text: "100";
     in-out property <string> filter-stats: "";
+    in-out property <bool> is-logging-in: false;
+    in-out property <bool> is-testing: false;
+    in property <string> manual-sentinel;
+    
+    // AWS Profile properties
+    in-out property <string> selected-aws-profile: "";
+    in property <[string]> aws-profile-name-list: [];
+    in-out property <bool> selected-profile-is-sso: false;
     
     // Bucket Management Properties
     in-out property <[BucketConfigItem]> bucket-list: [];
@@ -102,6 +111,8 @@ export component AppWindow inherits Window {
     callback save-filter-config();
     callback reset-filter-config();
     callback preview-filtering();
+    callback profile-selected(string);
+    callback sso-login(string);
 
     // Bucket management callbacks
     callback add-bucket(string, string);
@@ -184,10 +195,18 @@ AwsConfigSection {
             bucket-name-list: root.bucket-name-list;
             show-config <=> root.show-config;
             test-access-error: root.test-access-error;
+            aws-profile-name-list: root.aws-profile-name-list;
+            selected-aws-profile <=> root.selected-aws-profile;
+            selected-profile-is-sso <=> root.selected-profile-is-sso;
+            is-logging-in <=> root.is-logging-in;
+            is-testing <=> root.is-testing;
+            manual-sentinel: root.manual-sentinel;
             test-access(a, s, t, r, b) => { root.test-access(a, s, t, r, b); }
             bucket-selected(b) => { root.bucket-selected(b); }
             clear-cache() => { root.clear-cache(); }
             update-auto-invalidate(c) => { root.update-auto-invalidate(c); }
+            profile-selected(p) => { root.profile-selected(p); }
+            sso-login(p) => { root.sso-login(p); }
         }
 
         FolderPickerSection {
@@ -203,10 +222,12 @@ AwsConfigSection {
             has-log-path: root.log-path != "";
             is-opening-log: root.is-opening-log;
             download-target-path <=> root.download-target-path;
-            is-downloading: root.is-downloading;
+            is-downloading <=> root.is-downloading;
+            is-syncing <=> root.is-syncing;
             total-size-text: root.total-size-text;
             eta-text: root.eta-text;
-            
+            selected-aws-profile: root.selected-aws-profile;
+            manual-sentinel: root.manual-sentinel;
             select-folder => { root.select-folder(); }
             select-files => { root.select-files(); }
             clear-folders => { root.clear-folders(); }
